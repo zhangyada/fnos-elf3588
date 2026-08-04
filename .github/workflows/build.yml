@@ -143,22 +143,24 @@ jobs:
           BUILT_JSON: ${{ toJSON(needs.build.outputs) }}
         run: |
           N=$(python3 - <<'EOF'
-          import json, os
+          import json, os, sys
+          def dbg(msg):
+              print(msg, file=sys.stderr, flush=True)
           raw = os.environ.get('BUILT_JSON', '')
-          print(f'DEBUG BUILT_JSON len={len(raw)}: {raw[:600]}', flush=True)
+          dbg(f'DEBUG BUILT_JSON len={len(raw)}: {raw[:600]}')
           lines = []
           if raw:
               try:
                   data = json.loads(raw)
               except Exception as exc:
-                  print(f'DEBUG json error: {exc}', flush=True)
+                  dbg(f'DEBUG json error: {exc}')
                   data = None
               if isinstance(data, dict):
                   for job, o in data.items():
                       if o and o.get('asset_name'):
                           lines.append(f"{o['asset_name']} {o.get('asset_digest', '')}")
           if not lines:
-              print('DEBUG no lines -> skip', flush=True)
+              dbg('DEBUG no lines -> skip')
               print(0)
               raise SystemExit(0)
           path = 'state/last-built.txt'
@@ -170,11 +172,11 @@ jobs:
               f.write('# 已构建过的镜像记录，格式：<asset_name> <sha256>\n')
               for ln in merged:
                   f.write(ln + '\n')
-          print(f'DEBUG recorded: {lines}', flush=True)
+          dbg(f'DEBUG recorded: {lines}')
           print(len(lines))
           EOF
           )
-          if [ "$N" -eq 0 ]; then
+          if [ "$N" = "0" ]; then
             echo "本轮无成功构建，跳过记录"
             exit 0
           fi
