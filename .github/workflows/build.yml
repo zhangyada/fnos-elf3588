@@ -10,10 +10,12 @@
 # =============================================================================
 name: Build ELF3588 FnOS Image
 
-on:
+"on":
   schedule:
     - cron: "0 2 * * *"          # 每天 02:00 UTC = 10:00 北京时间
   workflow_dispatch: {}          # 支持手动触发
+  push:
+    branches: [main]             # 推代码时也自动检查并构建
 
 permissions:
   contents: write                # 需要：提交 state 文件 + 创建 Release
@@ -100,12 +102,12 @@ jobs:
               --title "ELF3588 FnOS $DATE (k$KERNEL_VERSION)" \
               --notes "面向 ELF3588 魔改的飞牛 FnOS 镜像。
 
-- 上游: [ophub/fnnas](https://github.com/ophub/fnnas) tag \`$UPSTREAM_TAG\`
-- 内核: k$KERNEL_VERSION
-- 设备树: dts/rk3588-elf2.dts（ELF3588 专用，含 USB3.0 quirk 修复）
-- 烧写: 下载 \`*.img.gz\` 解压后 dd 或 rk3588 工具写入 TF 卡/eMMC
+          - 上游: [ophub/fnnas](https://github.com/ophub/fnnas) tag \`$UPSTREAM_TAG\`
+          - 内核: k$KERNEL_VERSION
+          - 设备树: dts/rk3588-elf2.dts（ELF3588 专用，含 USB3.0 quirk 修复）
+          - 烧写: 下载 \`*.img.gz\` 解压后 dd 或 rk3588 工具写入 TF 卡/eMMC
 
-校验：\`sha256sum -c SHA256SUMS\`"
+          校验：\`sha256sum -c SHA256SUMS\`"
           fi
 
       - name: 记录已构建镜像（防重复）
