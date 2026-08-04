@@ -61,6 +61,9 @@ jobs:
     strategy:
       fail-fast: false           # 一个失败不取消其他
       matrix: ${{ fromJSON(needs.check.outputs.matrix) }}
+    outputs:
+      asset_name: ${{ steps.result.outputs.asset_name }}
+      asset_digest: ${{ steps.result.outputs.asset_digest }}
     env:
       ASSET_NAME: ${{ matrix.asset_name }}
       ASSET_URL: ${{ matrix.asset_url }}
@@ -110,15 +113,12 @@ jobs:
           校验：\`sha256sum -c SHA256SUMS\`"
           fi
 
-      - name: 记录已构建镜像（防重复）
+      - name: 输出构建结果（供汇总记录）
+        id: result
+        if: success()
         run: |
-          echo "$ASSET_NAME $ASSET_DIGEST" >> state/last-built.txt
-          sort -u state/last-built.txt -o state/last-built.txt
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add state/last-built.txt
-          git diff --cached --quiet || git commit -m "build: 记录已构建镜像 $ASSET_NAME"
-          git push
+          echo "asset_name=$ASSET_NAME" >> "$GITHUB_OUTPUT"
+          echo "asset_digest=$ASSET_DIGEST" >> "$GITHUB_OUTPUT"
 
       - name: 上传构建产物备份（可选）
         uses: actions/upload-artifact@v4
@@ -126,3 +126,50 @@ jobs:
           name: elf3588-${{ matrix.date }}
           path: out/
           retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # 第三步：所有构建完成后，串行汇总已构建记录并提交（避免并发 push 冲突）
+  # ---------------------------------------------------------------------------
+  record:
+    name: 汇总记录已构建镜像
+    needs: build
+    if: always()                 # 部分构建失败也要记录成功的那些
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 汇总并提交已构建记录
+        env:
+          BUILT_JSON: ${{ toJSON(needs.build.outputs) }}
+        run: |
+          N=$(python3 - <<'EOF'
+          import json, os
+          data = json.loads(os.environ['BUILT_JSON'])
+          lines = []
+          for job, o in data.items():
+              if o and o.get('asset_name'):
+                  lines.append(f"{o['asset_name']} {o.get('asset_digest', '')}")
+          if not lines:
+              print(0)
+              raise SystemExit(0)
+          path = 'state/last-built.txt'
+          existing = []
+          if os.path.exists(path):
+              existing = [ln.strip() for ln in open(path, encoding='utf-8') if ln.strip() and not ln.startswith('#')]
+          merged = sorted(set(existing + lines))
+          with open(path, 'w', encoding='utf-8') as f:
+              f.write('# 已构建过的镜像记录，格式：<asset_name> <sha256>\n')
+              for ln in merged:
+                  f.write(ln + '\n')
+          print(len(lines))
+          EOF
+          )
+          if [ "$N" -eq 0 ]; then
+            echo "本轮无成功构建，跳过记录"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state/last-built.txt
+          git diff --cached --quiet || git commit -m "build: 汇总记录已构建镜像"
+          git push
