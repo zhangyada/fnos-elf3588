@@ -157,9 +157,15 @@ jobs:
                   dbg(f'DEBUG json error: {exc}')
                   data = None
               if isinstance(data, dict):
-                  for job, o in data.items():
-                      if o and o.get('asset_name'):
-                          lines.append(f"{o['asset_name']} {o.get('asset_digest', '')}")
+                  if 'asset_name' in data:
+                      # 单矩阵项：GitHub 返回平铺 outputs 结构
+                      if data.get('asset_name'):
+                          lines.append(f"{data['asset_name']} {data.get('asset_digest', '')}")
+                  else:
+                      # 多矩阵项：嵌套 {job_id: {...}} 结构
+                      for job, o in data.items():
+                          if isinstance(o, dict) and o.get('asset_name'):
+                              lines.append(f"{o['asset_name']} {o.get('asset_digest', '')}")
           if not lines:
               dbg('DEBUG no lines -> skip')
               print(0)
