@@ -6,10 +6,9 @@
 #   1. 下载官方镜像并校验 sha256
 #   2. 解压得到 .img
 #   3. 下载对应内核版本源码（版本号从文件名 kX.Y.Z 解析）
-#   4. 挂载启动分区（GPT 分区1，偏移 32768*512），取出内核 config
-#   5. 放入 dts/rk3588-elf2.dts，交叉编译 rk3588-elf2.dtb
-#   6. 把 dtb 写回启动分区 dtb/rockchip/，并把 armbianEnv.txt 的 fdtfile 指到它
-#   7. 卸载分区，gzip 重新打包，输出 fnnas_rockchip_elf3588_*.img.gz + SHA256SUMS
+#   4. 放入 dts/rk3588-elf2.dts，defconfig + 交叉编译 rk3588-elf2.dtb
+#   5. 挂载启动分区（GPT 分区1，偏移 32768*512），写入 dtb 并把 armbianEnv.txt 的 fdtfile 指到它
+#   6. gzip 重新打包，输出 fnnas_rockchip_elf3588_*.img.gz + SHA256SUMS
 #
 # 所需环境变量（由 GitHub Actions matrix 传入）：
 #   ASSET_NAME / ASSET_URL / ASSET_DIGEST / KERNEL_VERSION / DATE
@@ -66,21 +65,14 @@ KSRC="linux-$KERNEL_VERSION"
 echo "::endgroup::"
 
 # ---------------------------------------------------------------------------
-# 4. 挂载启动分区，取出内核 config（与手动流程一致，供编译使用）
+# 4. 放入设备树，生成基础配置（无 .config 时顶层 make 会拒绝编译），交叉编译
 # ---------------------------------------------------------------------------
-echo "::group::4/7 挂载启动分区"
-sudo mkdir -p /mnt/fnos
-sudo mount -o loop,offset=$((32768 * 512)) "$IMG" /mnt/fnos
-sudo cp /mnt/fnos/config-* ./.config 2>/dev/null || echo "  (未找到 config 文件，跳过)"
-ls -la /mnt/fnos/
-echo "::endgroup::"
-
-# ---------------------------------------------------------------------------
-# 5. 编译 rk3588-elf2.dtb
-# ---------------------------------------------------------------------------
-echo "::group::5/7 交叉编译 rk3588-elf2.dtb"
+echo "::group::4/7 交叉编译 rk3588-elf2.dtb"
 cp "$REPO_ROOT/dts/rk3588-elf2.dts" "$KSRC/arch/arm64/boot/dts/rockchip/rk3588-elf2.dts"
 cd "$KSRC"
+# defconfig 仅为满足内核 make 的 .config 检查（arm64 默认配置已含 Rockchip 支持），
+# 不影响 dtb 产物内容；FnOS 官方镜像启动分区里并没有 config 文件，不能依赖它
+make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
 make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- rockchip/rk3588-elf2.dtb -j"$(nproc)"
 cd "$WORK"
 DTB="$KSRC/arch/arm64/boot/dts/rockchip/rk3588-elf2.dtb"
@@ -88,20 +80,23 @@ test -f "$DTB" && echo "  dtb 编译成功: $DTB"
 echo "::endgroup::"
 
 # ---------------------------------------------------------------------------
-# 6. 写回 dtb + 修改 armbianEnv.txt（分区仍挂载中，一次搞定）
+# 5. 挂载启动分区，写入 dtb + 修改 armbianEnv.txt
 # ---------------------------------------------------------------------------
-echo "::group::6/7 写入 dtb 并修改 armbianEnv.txt"
+echo "::group::5/7 挂载启动分区并写入 dtb"
+sudo mkdir -p /mnt/fnos
+sudo mount -o loop,offset=$((32768 * 512)) "$IMG" /mnt/fnos
 sudo cp "$DTB" /mnt/fnos/dtb/rockchip/
 sudo sed -i 's|^fdtfile=.*|fdtfile=rockchip/rk3588-elf2.dtb|' /mnt/fnos/armbianEnv.txt
 echo "  --- armbianEnv.txt ---"
 sudo cat /mnt/fnos/armbianEnv.txt
+ls -la /mnt/fnos/
 sudo umount /mnt/fnos
 echo "::endgroup::"
 
 # ---------------------------------------------------------------------------
-# 7. 清理内核源码 + 重新打包 + 校验
+# 6. 清理内核源码 + 重新打包 + 校验
 # ---------------------------------------------------------------------------
-echo "::group::7/7 重新打包"
+echo "::group::6/7 重新打包"
 rm -rf "$WORK/$KSRC"                                   # 内核源码已用完，删除省磁盘
 
 OUT_NAME="fnnas_rockchip_elf3588_k${KERNEL_VERSION}_${DATE}.img.gz"
