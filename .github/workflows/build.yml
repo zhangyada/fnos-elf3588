@@ -1,0 +1,126 @@
+# =============================================================================
+# Build ELF3588 FnOS Image
+#
+# 定时（每天 02:00 UTC = 北京时间 10:00）+ 手动触发。
+# 检测 ophub/fnnas 上游是否有新的 orangepi-5-plus 镜像，有则自动：
+#   下载 → 编译 ELF3588 设备树 → 替换 dtb → 改 armbianEnv.txt → 重新打包
+#   → 发布到本仓库 Release（tag: elf3588-<日期>）→ 记录到 state/last-built.txt
+#
+# 首次使用：Actions 页面手动点一次 "Run workflow"。
+# =============================================================================
+name: Build ELF3588 FnOS Image
+
+on:
+  schedule:
+    - cron: "0 2 * * *"          # 每天 02:00 UTC = 10:00 北京时间
+  workflow_dispatch: {}          # 支持手动触发
+
+permissions:
+  contents: write                # 需要：提交 state 文件 + 创建 Release
+
+concurrency:
+  group: fnos-elf3588-build
+  cancel-in-progress: false      # 同一时间只允许一个构建流程
+
+env:
+  UPSTREAM_REPO: ophub/fnnas
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 第一步：检测上游是否有新镜像
+  # ---------------------------------------------------------------------------
+  check:
+    name: 检测上游更新
+    runs-on: ubuntu-latest
+    outputs:
+      new_count: ${{ steps.check.outputs.new_count }}
+      matrix: ${{ steps.check.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 查询上游 release
+        id: check
+        run: python3 scripts/check-upstream.py
+
+      - name: 打印检测结果
+        run: |
+          echo "新镜像数量: ${{ steps.check.outputs.new_count }}"
+          echo "matrix: ${{ steps.check.outputs.matrix }}"
+
+  # ---------------------------------------------------------------------------
+  # 第二步：对每个新镜像执行构建（矩阵并行）
+  # ---------------------------------------------------------------------------
+  build:
+    name: 构建 ${{ matrix.date }}
+    needs: check
+    if: needs.check.outputs.new_count != '0' && needs.check.outputs.matrix != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false           # 一个失败不取消其他
+      matrix: ${{ fromJSON(needs.check.outputs.matrix) }}
+    env:
+      ASSET_NAME: ${{ matrix.asset_name }}
+      ASSET_URL: ${{ matrix.asset_url }}
+      ASSET_DIGEST: ${{ matrix.asset_digest }}
+      KERNEL_VERSION: ${{ matrix.kernel_version }}
+      DATE: ${{ matrix.date }}
+      UPSTREAM_TAG: ${{ matrix.upstream_tag }}
+      RELEASE_TAG: ${{ matrix.release_tag }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装交叉编译工具链
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc-aarch64-linux-gnu \
+            device-tree-compiler \
+            flex bison libssl-dev bc
+
+      - name: 构建 ELF3588 镜像
+        run: |
+          chmod +x scripts/build-image.sh
+          ./scripts/build-image.sh
+
+      - name: 发布到 GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd out
+          # 若 tag 已存在（如手动重跑），改为补充上传
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" SHA256SUMS *.img.gz \
+              --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$RELEASE_TAG" \
+              SHA256SUMS *.img.gz \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "ELF3588 FnOS $DATE (k$KERNEL_VERSION)" \
+              --notes "面向 ELF3588 魔改的飞牛 FnOS 镜像。
+
+- 上游: [ophub/fnnas](https://github.com/ophub/fnnas) tag \`$UPSTREAM_TAG\`
+- 内核: k$KERNEL_VERSION
+- 设备树: dts/rk3588-elf2.dts（ELF3588 专用，含 USB3.0 quirk 修复）
+- 烧写: 下载 \`*.img.gz\` 解压后 dd 或 rk3588 工具写入 TF 卡/eMMC
+
+校验：\`sha256sum -c SHA256SUMS\`"
+          fi
+
+      - name: 记录已构建镜像（防重复）
+        run: |
+          echo "$ASSET_NAME $ASSET_DIGEST" >> state/last-built.txt
+          sort -u state/last-built.txt -o state/last-built.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state/last-built.txt
+          git diff --cached --quiet || git commit -m "build: 记录已构建镜像 $ASSET_NAME"
+          git push
+
+      - name: 上传构建产物备份（可选）
+        uses: actions/upload-artifact@v4
+        with:
+          name: elf3588-${{ matrix.date }}
+          path: out/
+          retention-days: 30
