@@ -89,5 +89,5 @@ python3 scripts/check-upstream.py
 ## 参考
 
 - 上游: https://github.com/ophub/fnnas
-- 移植教程: https://resona.top/ok3588-c-yi-zhi-fei-niu-fnos/
+- 移植教程: https://resona.top/
 - 内核源码: https://www.kernel.org/
