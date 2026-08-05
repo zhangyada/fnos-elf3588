@@ -41,12 +41,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           # 取最新非 d10g 的标准版 Release（tag 形如 elf3588-YYYY.MM.DD）
-          tag=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 20 \
+          # 注意：gh release list 默认按创建时间排序，06.25 后建会在前；
+          #       必须按 tagName（日期）字典序取最新，才能拿到最新镜像版本
+          tag=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 30 \
             --json tagName 2>/dev/null | python3 -c "
           import json, sys
           rels = json.load(sys.stdin)
-          tags = [r['tagName'] for r in rels
-                  if r['tagName'].startswith('elf3588-') and '-d10g-' not in r['tagName']]
+          tags = sorted([r['tagName'] for r in rels
+                         if r['tagName'].startswith('elf3588-') and '-d10g-' not in r['tagName']],
+                        reverse=True)
           print(tags[0] if tags else '')
           ")
           [ -n "$tag" ] || { echo "错误: 未找到标准版 Release（先跑标准版构建）"; exit 1; }
@@ -73,13 +76,13 @@ jobs:
       - name: 安装分区工具
         run: |
           sudo apt-get update
-          sudo apt-get install -y e2fsprogs parted
+          sudo apt-get install -y e2fsprogs
 
-      - name: 缩分区并重新打包
+      - name: 改 fnnas.conf（rootfs 限 19G，尾留 10G+ 数据空间）并重新打包
         env:
           DATE: ${{ steps.ver.outputs.date }}
           KERNEL_VERSION: ${{ steps.ver.outputs.kver }}
-          DATA_GB: "10"
+          LIMIT_GB: "19"
         run: |
           cd work10g
           chmod +x ../scripts/shrink-data10g.sh
@@ -97,12 +100,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_NOTES: |-
-            标准版镜像基础上把 rootfs 缩小 ${DATA_GB:-10}G，磁盘尾部预留 ${DATA_GB:-10}G 未分配空间。
+            标准版镜像基础上，把 /etc/fnnas.conf 的 rootfs_limit_gib 设为 19：
+            烧录后首次启动 fnnas-tf 只把 rootfs 扩到 19G，磁盘尾部留出 10G+ 未分配空间。
 
             安装后可在「设置 → 存储空间管理 → 创建存储空间」使用内置 eMMC 空间。
 
             - 基础: ${{ steps.find.outputs.tag }}
             - 内核: k${{ steps.ver.outputs.kver }}
+            - rootfs 上限: 19G（数据空间 = 盘实际容量 - 19G ≥ 10G）
             - 烧写: 下载 *.img.gz 解压后 dd 或 rk3588 工具写入 TF 卡/eMMC
 
             校验：sha256sum -c SHA256SUMS
@@ -115,6 +120,6 @@ jobs:
           else
             gh release create "$TAG" SHA256SUMS *.img.gz \
               --repo "$GITHUB_REPOSITORY" \
-              --title "ELF3588 FnOS (系统+${DATA_GB:-10}G数据) k${{ steps.ver.outputs.kver }}" \
+              --title "ELF3588 FnOS (系统19G+数据10G) k${{ steps.ver.outputs.kver }}" \
               --notes "$RELEASE_NOTES"
           fi
