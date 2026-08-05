@@ -21,6 +21,7 @@ name: Build ELF3588 FnOS Image (Data10G)
 
 permissions:
   contents: write                # 需要：创建/更新 Release
+  issues: write                  # 需要：失败时发诊断到 issue
 
 concurrency:
   group: fnos-elf3588-data10g
@@ -95,6 +96,26 @@ jobs:
             tail -20 shrink.log | sed 's/^/::error::/'
             exit $RC
           fi
+
+      - name: 失败诊断发布到 issue（完整日志，公开可查）
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "## 数据版构建失败诊断 (run ${{ github.run_id }})"
+            echo ""
+            echo '```'
+            if [ -f work10g/shrink.log ]; then
+              tail -80 work10g/shrink.log
+            else
+              echo "（shrink.log 不存在，步骤可能在更早阶段失败）"
+            fi
+            echo '```'
+          } > diag.md
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "[自动] 数据版构建失败 run ${{ github.run_id }}" \
+            --body-file diag.md || true
 
       - name: 发布到 GitHub Release (elf3588-d10g-<date>)
         env:

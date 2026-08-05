@@ -77,25 +77,33 @@ echo "::endgroup::"
 echo "::group::3/5 挂载 rootfs"
 ROOTFS_PART=""
 BIGGEST=0
-for p in $(sudo lsblk -no PATH "$LOOP" | grep "^${LOOP}p"); do
+# 用变量接收分区列表，grep 无匹配时 || true 保护（避免 set -e 静默退出）
+PARTS=$(sudo lsblk -no PATH "$LOOP" 2>/dev/null | grep "^${LOOP}p" || true)
+for p in $PARTS; do
     [ -b "$p" ] || { echo "  跳过（非块设备）: $p"; continue; }
     # 注意：loop 分区设备属于 root:disk，必须用 sudo 才能读 superblock
     fstype=$(sudo lsblk -no FSTYPE "$p" 2>/dev/null || true)
     [ -n "$fstype" ] || fstype=$(sudo blkid -s TYPE -o value "$p" 2>/dev/null || true)
     size=$(sudo lsblk -bno SIZE "$p" 2>/dev/null || true)
-    echo "  $p: fs=${fstype:-?} size=${size:-?}"
-    if [ "$fstype" = "ext4" ]; then
+    label=$(sudo lsblk -no LABEL "$p" 2>/dev/null || true)
+    echo "  $p: fs=${fstype:-?} size=${size:-?} label=${label:-?}"
+    # 跳过启动分区（label=BOOT），rootfs 只可能是 ext4/btrfs
+    if [ "$label" = "BOOT" ] || [ "$label" = "boot" ]; then
+        echo "  跳过启动分区: $p"
+        continue
+    fi
+    if [ "$fstype" = "ext4" ] || [ "$fstype" = "btrfs" ]; then
         if [ "${size:-0}" -gt "$BIGGEST" ]; then
-            ROOTFS_PART="$p"; BIGGEST="$size"
+            ROOTFS_PART="$p"; BIGGEST="$size"; ROOTFS_FS="$fstype"
         fi
     fi
 done
 if [ -z "$ROOTFS_PART" ]; then
-    echo "错误: 未找到 ext4 rootfs 分区。当前分区布局："
-    sudo lsblk -o NAME,SIZE,FSTYPE "$LOOP" || true
+    echo "错误: 未找到 rootfs 分区（ext4/btrfs，非 BOOT）。当前分区布局："
+    sudo lsblk -o NAME,SIZE,FSTYPE,LABEL "$LOOP" || true
     exit 1
 fi
-echo "rootfs 分区: $ROOTFS_PART ($(( BIGGEST / 1024 / 1024 / 1024 ))G)"
+echo "rootfs 分区: $ROOTFS_PART ($(( BIGGEST / 1024 / 1024 / 1024 ))G, $ROOTFS_FS)"
 
 MNT="$WORK/mnt"
 mkdir -p "$MNT"
