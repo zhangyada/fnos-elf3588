@@ -58,9 +58,11 @@ echo "::endgroup::"
 # 2. loop 挂载（带分区表）
 # ---------------------------------------------------------------------------
 echo "::group::2/6 挂载 loop 设备"
+# 保险：确保 loop 模块已加载（runner 内核一般自带，失败忽略）
+sudo modprobe loop 2>/dev/null || true
 LOOP=$(sudo losetup -fP --show "$IMG")
 echo "loop 设备: $LOOP"
-lsblk -o NAME,SIZE,FSTYPE,LABEL "$LOOP"
+sudo lsblk -o NAME,SIZE,FSTYPE,LABEL "$LOOP"
 echo "::endgroup::"
 
 # ---------------------------------------------------------------------------
@@ -72,8 +74,9 @@ ROOTFS_FS=""
 BIGGEST=0
 for p in "${LOOP}"p*; do
     [ -b "$p" ] || continue
-    fstype=$(lsblk -no FSTYPE "$p" 2>/dev/null || true)
-    size=$(lsblk -bno SIZE "$p" 2>/dev/null || true)
+    # 注意：loop 分区设备属于 root:disk，必须用 sudo 才能读 superblock
+    fstype=$(sudo lsblk -no FSTYPE "$p" 2>/dev/null || true)
+    size=$(sudo lsblk -bno SIZE "$p" 2>/dev/null || true)
     if [ "$fstype" = "ext4" ] || [ "$fstype" = "btrfs" ]; then
         if [ "${size:-0}" -gt "$BIGGEST" ]; then
             ROOTFS_PART="$p"; ROOTFS_FS="$fstype"; BIGGEST="$size"
@@ -93,7 +96,7 @@ echo "::endgroup::"
 # 4. 计算目标大小并缩小文件系统（先 fs 后分区表，顺序不能反）
 # ---------------------------------------------------------------------------
 echo "::group::4/6 缩小 rootfs（${DATA_GB}G）"
-CUR_BYTES=$(lsblk -bno SIZE "$ROOTFS_PART")
+CUR_BYTES=$(sudo lsblk -bno SIZE "$ROOTFS_PART")
 CUR_GB=$(( CUR_BYTES / 1024 / 1024 / 1024 ))
 NEW_GB=$(( CUR_GB - DATA_GB ))
 [ "$NEW_GB" -gt 5 ] || { echo "错误: 缩小后 rootfs 仅 ${NEW_GB}G，疑似磁盘过小"; exit 1; }
