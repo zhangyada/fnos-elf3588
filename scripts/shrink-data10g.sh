@@ -61,6 +61,13 @@ echo "::group::2/5 挂载 loop 设备"
 sudo modprobe loop 2>/dev/null || true
 LOOP=$(sudo losetup -fP --show "$IMG")
 echo "loop 设备: $LOOP"
+sleep 2
+# losetup -P 在某些内核环境不自动创建分区节点：用 partx 通知内核扫描兜底
+if ! sudo lsblk -no PATH "$LOOP" | grep -q "^${LOOP}p"; then
+    echo "loop 分区节点未自动创建，partx -a 扫描..."
+    sudo partx -a "$LOOP" 2>/dev/null || true
+    sleep 2
+fi
 sudo lsblk -o NAME,SIZE,FSTYPE,LABEL "$LOOP"
 echo "::endgroup::"
 
@@ -70,23 +77,29 @@ echo "::endgroup::"
 echo "::group::3/5 挂载 rootfs"
 ROOTFS_PART=""
 BIGGEST=0
-for p in "${LOOP}"p*; do
-    [ -b "$p" ] || continue
+for p in $(sudo lsblk -no PATH "$LOOP" | grep "^${LOOP}p"); do
+    [ -b "$p" ] || { echo "  跳过（非块设备）: $p"; continue; }
     # 注意：loop 分区设备属于 root:disk，必须用 sudo 才能读 superblock
     fstype=$(sudo lsblk -no FSTYPE "$p" 2>/dev/null || true)
+    [ -n "$fstype" ] || fstype=$(sudo blkid -s TYPE -o value "$p" 2>/dev/null || true)
     size=$(sudo lsblk -bno SIZE "$p" 2>/dev/null || true)
+    echo "  $p: fs=${fstype:-?} size=${size:-?}"
     if [ "$fstype" = "ext4" ]; then
         if [ "${size:-0}" -gt "$BIGGEST" ]; then
             ROOTFS_PART="$p"; BIGGEST="$size"
         fi
     fi
 done
-[ -n "$ROOTFS_PART" ] || { echo "错误: 未找到 ext4 rootfs 分区"; exit 1; }
+if [ -z "$ROOTFS_PART" ]; then
+    echo "错误: 未找到 ext4 rootfs 分区。当前分区布局："
+    sudo lsblk -o NAME,SIZE,FSTYPE "$LOOP" || true
+    exit 1
+fi
 echo "rootfs 分区: $ROOTFS_PART ($(( BIGGEST / 1024 / 1024 / 1024 ))G)"
 
 MNT="$WORK/mnt"
 mkdir -p "$MNT"
-sudo mount "$ROOTFS_PART" "$MNT"
+sudo mount "$ROOTFS_PART" "$MNT" || { echo "错误: mount $ROOTFS_PART 失败"; exit 1; }
 echo "已挂载: $ROOTFS_PART → $MNT"
 ls "$MNT/etc/fnnas.conf" 2>/dev/null && cat "$MNT/etc/fnnas.conf" || echo "（镜像内无 fnnas.conf，将新建）"
 echo "::endgroup::"
