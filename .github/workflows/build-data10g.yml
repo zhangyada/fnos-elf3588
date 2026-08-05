@@ -75,19 +75,23 @@ jobs:
           echo "内核: $KVER | 日期: $DATE"
           echo "kver=$KVER" >> "$GITHUB_OUTPUT"
           echo "date=$DATE" >> "$GITHUB_OUTPUT"
-          # 防重复：数据版 tag 已存在（上游镜像未变化）则直接结束，不再重新构建/上传
+          # 防重复：数据版 tag 已存在（上游镜像未变化）则跳过后续步骤
           TAG="elf3588-d10g-$DATE"
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "::notice::数据版 $TAG 已存在（上游镜像未变化），跳过本次构建"
-            exit 0
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: 安装分区工具
+        if: steps.ver.outputs.skip != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y e2fsprogs
 
       - name: 改 fnnas.conf（rootfs 限 19G，尾留 10G+ 数据空间）并重新打包
+        if: steps.ver.outputs.skip != 'true'
         env:
           DATE: ${{ steps.ver.outputs.date }}
           KERNEL_VERSION: ${{ steps.ver.outputs.kver }}
@@ -126,6 +130,7 @@ jobs:
             --body-file diag.md || true
 
       - name: 发布到 GitHub Release (elf3588-d10g-<date>)
+        if: steps.ver.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_NOTES: |-
