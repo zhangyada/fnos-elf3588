@@ -99,9 +99,15 @@ echo "::endgroup::"
 echo "::group::6/7 重新打包"
 rm -rf "$WORK/$KSRC"                                   # 内核源码已用完，删除省磁盘
 
-OUT_NAME="fnnas_rockchip_elf3588_k${KERNEL_VERSION}_${DATE}.img.gz"
-gzip -9 -c "$IMG" > "$OUT/$OUT_NAME"
-rm -f "$IMG"
+# 注意：必须先重命名为 elf3588 名再 gzip。
+# gzip 头会记录输入文件名，若直接压缩 $IMG（官方下载时名为
+# orangepi-5-plus），解压出来的文件名会残留 orangepi-5-plus，
+# 与本仓库 elf3588 命名不一致（历史 Release 有此问题）。
+OUT_BASE="fnnas_rockchip_elf3588_k${KERNEL_VERSION}_${DATE}.img"
+OUT_NAME="${OUT_BASE}.gz"
+mv "$IMG" "$OUT_BASE"
+gzip -9 -c "$OUT_BASE" > "$OUT/$OUT_NAME"
+rm -f "$OUT_BASE"
 
 cd "$OUT"
 sha256sum "$OUT_NAME" > SHA256SUMS

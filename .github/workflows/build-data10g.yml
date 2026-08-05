@@ -1,0 +1,112 @@
+# =============================================================================
+# Build ELF3588 FnOS Image (Data10G Variant) — 数据版镜像
+#
+# 基于标准版构建产物（build.yml 的 elf3588-<date> Release），把 rootfs 缩小
+# DATA_GB（默认 10）GiB，磁盘尾部留出对应未分配空间，供飞牛创建存储空间。
+#
+# 触发：
+#   - 标准版 workflow 成功后自动跟跑（workflow_run）→ 每次上游更新自动出两个镜像
+#   - 手动触发（workflow_dispatch）→ 基于最新标准版资产构建
+#
+# 产出：fnnas_rockchip_elf3588_d10g_k<ver>_<date>.img.gz
+# 发布：独立 Release tag elf3588-d10g-<date>（与标准版隔离，避免并发写冲突）
+# =============================================================================
+name: Build ELF3588 FnOS Image (Data10G)
+
+"on":
+  workflow_run:
+    workflows: ["Build ELF3588 FnOS Image"]
+    types: [completed]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write                # 需要：创建/更新 Release
+
+concurrency:
+  group: fnos-elf3588-data10g
+  cancel-in-progress: false
+
+jobs:
+  shrink:
+    name: 构建数据版镜像
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 查找并下载最新标准版镜像
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # 取最新非 d10g 的标准版 Release（tag 形如 elf3588-YYYY.MM.DD）
+          tag=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 20 \
+            --json tagName 2>/dev/null | python3 -c "
+          import json, sys
+          rels = json.load(sys.stdin)
+          tags = [r['tagName'] for r in rels
+                  if r['tagName'].startswith('elf3588-') and '-d10g-' not in r['tagName']]
+          print(tags[0] if tags else '')
+          ")
+          [ -n "$tag" ] || { echo "错误: 未找到标准版 Release（先跑标准版构建）"; exit 1; }
+          echo "使用标准版 Release: $tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          mkdir -p work10g
+          gh release download "$tag" \
+            --pattern 'fnnas_rockchip_elf3588_*.img.gz' \
+            --repo "$GITHUB_REPOSITORY" --dir work10g --clobber
+          ls -lh work10g/
+
+      - name: 解析版本号
+        id: ver
+        run: |
+          F=$(ls work10g/fnnas_rockchip_elf3588_*.img.gz | head -1)
+          BASE=$(basename "$F" .img.gz)
+          # 形如 fnnas_rockchip_elf3588_k6.18.18_2026.06.25
+          KVER=$(echo "$BASE" | sed -E 's/.*_k([0-9.]+)_.*/\1/')
+          DATE=$(echo "$BASE" | sed -E 's/.*_k[0-9.]+_([0-9.]+)$/\1/')
+          echo "内核: $KVER | 日期: $DATE"
+          echo "kver=$KVER" >> "$GITHUB_OUTPUT"
+          echo "date=$DATE" >> "$GITHUB_OUTPUT"
+
+      - name: 安装分区工具
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y e2fsprogs parted
+
+      - name: 缩分区并重新打包
+        env:
+          DATE: ${{ steps.ver.outputs.date }}
+          KERNEL_VERSION: ${{ steps.ver.outputs.kver }}
+          DATA_GB: "10"
+        run: |
+          cd work10g
+          chmod +x ../scripts/shrink-data10g.sh
+          ../scripts/shrink-data10g.sh
+
+      - name: 发布到 GitHub Release (elf3588-d10g-<date>)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_NOTES: |-
+            标准版镜像基础上把 rootfs 缩小 ${DATA_GB:-10}G，磁盘尾部预留 ${DATA_GB:-10}G 未分配空间。
+
+            安装后可在「设置 → 存储空间管理 → 创建存储空间」使用内置 eMMC 空间。
+
+            - 基础: ${{ steps.find.outputs.tag }}
+            - 内核: k${{ steps.ver.outputs.kver }}
+            - 烧写: 下载 *.img.gz 解压后 dd 或 rk3588 工具写入 TF 卡/eMMC
+
+            校验：sha256sum -c SHA256SUMS
+        run: |
+          cd out10g
+          TAG="elf3588-d10g-${{ steps.ver.outputs.date }}"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" SHA256SUMS *.img.gz \
+              --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" SHA256SUMS *.img.gz \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "ELF3588 FnOS (系统+${DATA_GB:-10}G数据) k${{ steps.ver.outputs.kver }}" \
+              --notes "$RELEASE_NOTES"
+          fi

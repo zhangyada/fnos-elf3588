@@ -23,12 +23,15 @@ graph LR
 
 ```
 .
-├── .github/workflows/build.yml   # 自动构建工作流（定时 + 手动）
+├── .github/workflows/
+│   ├── build.yml                # 自动构建工作流（定时 + 手动）
+│   └── build-data10g.yml        # 数据版构建（rootfs 缩 10G 留出存储空间）
 ├── dts/
 │   └── rk3588-elf2.dts           # ELF3588 专用设备树（已验证，含 USB3.0 quirk 修复）
 ├── scripts/
 │   ├── check-upstream.py         # 检测上游新镜像（按文件名+sha256 跟踪，不重复构建）
-│   └── build-image.sh            # 构建脚本（复刻 4/29 手动流程）
+│   ├── build-image.sh            # 构建脚本（复刻 4/29 手动流程）
+│   └── shrink-data10g.sh         # 缩分区脚本（系统 + 10G 数据空间版）
 ├── state/
 │   └── last-built.txt            # 已构建记录（工作流自动维护）
 └── README.md
@@ -57,15 +60,26 @@ graph LR
 
 ### 2. 日常使用
 
-- 每天 10:00（北京时间）自动检查一次，有新版自动构建并发 Release
-- 打开仓库 **Releases** 页，下载 `fnnas_rockchip_elf3588_k*.img.gz`
+- 每天 10:00（北京时间）自动检查一次，有新版自动构建并发 Release（标准版 + 数据版两个镜像）
+- 打开仓库 **Releases** 页下载镜像：
+  - `fnnas_rockchip_elf3588_k*.img.gz`（标准版：系统占满整个盘）
+  - `fnnas_rockchip_elf3588_d10g_k*.img.gz`（数据版：rootfs 缩小 10G，尾部留 10G 未分配空间）
 - 校验：`sha256sum -c SHA256SUMS`
 - 解压后按原方法烧写（dd 到 TF 卡 / eMMC 或 rk3588 烧写工具）
 
+> 提示：32G eMMC 设备建议用 **数据版（d10g）**——烧录后在飞牛
+> 「设置 → 存储空间管理 → 创建存储空间」即可用内置 eMMC 的 10G 空间；
+> 标准版系统占满全盘，没有剩余空间可建存储空间。
+
 ### 3. Release 命名
 
-- tag: `elf3588-<日期>`（如 `elf3588-2026.07.12`）
-- 镜像: `fnnas_rockchip_elf3588_k<内核>_<日期>.img.gz`
+- 标准版 tag: `elf3588-<日期>`（如 `elf3588-2026.07.12`）
+- 数据版 tag: `elf3588-d10g-<日期>`（如 `elf3588-d10g-2026.07.12`）
+- 标准版镜像: `fnnas_rockchip_elf3588_k<内核>_<日期>.img.gz`
+- 数据版镜像: `fnnas_rockchip_elf3588_d10g_k<内核>_<日期>.img.gz`
+
+> 数据版流水线（build-data10g.yml）由标准版成功后自动触发，无需手动干预。
+> 标准版产出的镜像内部文件名已统一为 elf3588（不再残留 orangepi-5-plus）。
 
 ## 常见问题
 
