@@ -83,7 +83,15 @@ jobs:
         run: |
           cd work10g
           chmod +x ../scripts/shrink-data10g.sh
-          ../scripts/shrink-data10g.sh
+          set +e
+          ../scripts/shrink-data10g.sh 2>&1 | tee shrink.log
+          RC=${PIPESTATUS[0]}
+          set -e
+          if [ $RC -ne 0 ]; then
+            echo "::error::shrink 脚本失败 (exit $RC)，最后 20 行："
+            tail -20 shrink.log | sed 's/^/::error::/'
+            exit $RC
+          fi
 
       - name: 发布到 GitHub Release (elf3588-d10g-<date>)
         env:
