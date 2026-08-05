@@ -62,14 +62,19 @@ graph LR
 
 - 每天 10:00（北京时间）自动检查一次，有新版自动构建并发 Release（标准版 + 数据版两个镜像）
 - 打开仓库 **Releases** 页下载镜像：
-  - `fnnas_rockchip_elf3588_k*.img.gz`（标准版：系统占满整个盘）
-  - `fnnas_rockchip_elf3588_d10g_k*.img.gz`（数据版：rootfs 缩小 10G，尾部留 10G 未分配空间）
+  - `fnnas_rockchip_elf3588_k*.img.gz`（标准版：rootfs 自动扩满整盘）
+  - `fnnas_rockchip_elf3588_d10g_k*.img.gz`（数据版：rootfs 限 19G，尾部留 10G+ 未分配）
 - 校验：`sha256sum -c SHA256SUMS`
 - 解压后按原方法烧写（dd 到 TF 卡 / eMMC 或 rk3588 烧写工具）
 
 > 提示：32G eMMC 设备建议用 **数据版（d10g）**——烧录后在飞牛
-> 「设置 → 存储空间管理 → 创建存储空间」即可用内置 eMMC 的 10G 空间；
-> 标准版系统占满全盘，没有剩余空间可建存储空间。
+> 「设置 → 存储空间管理 → 创建存储空间」即可用内置 eMMC 的 10G+ 空间；
+> 标准版 rootfs 会扩满整盘，没有剩余空间可建存储空间。
+>
+> **数据版原理**：fnnas 首次启动会调 `resize-rootfs.service`（/usr/sbin/fnnas-tf）
+> 自动扩展 rootfs，其上限由 `/etc/fnnas.conf` 的 `rootfs_limit_gib` 控制。
+> 数据版镜像只改这一个值（19），烧录后 fnnas-tf 把 rootfs 扩到 19G，
+> 剩余空间留作未分配，供飞牛创建存储空间——完全走官方机制，零分区操作。
 
 ### 3. Release 命名
 
