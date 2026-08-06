@@ -90,7 +90,9 @@ graph LR
 
 > 图片为实际烧写过程截图（RKDevTool v3.32，Loader v1.11），与下述步骤对应。
 
-**物料**：解压后的 `*.img` + `MiniLoaderAll.bin`（G 盘镜像目录内）
+<img width="970" height="461" alt="烧写说明" src="https://github.com/user-attachments/assets/3c965a7e-0c2c-432c-87d9-c65c19fa1b3f" />
+
+**物料**：解压后的 `*.img` + `MiniLoaderAll.bin`
 
 **步骤**：
 1. **解压**：`tar -xzf xxx.img.gz`（或 Etcher 直接烧录 .gz；不要用 7-Zip 双击解压，会把 .img 解成目录）
@@ -100,7 +102,7 @@ graph LR
 5. 设备通过 USB 连接并进入 **Maskrom 模式**（或 Loader 模式），工具显示"发现一个 Maskrom 设备"
 6. 点 **开始**（升级固件，强制按地址写）
 
-**烧写日志流程**（截图可见）：
+**烧写日志流程**：
 
 ```
 下载 Boot → 等待 Maskrom → 测试设备 → 校验芯片 → 获取 Flash 信息
