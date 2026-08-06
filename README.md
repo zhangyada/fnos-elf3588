@@ -25,13 +25,15 @@ graph LR
 .
 ├── .github/workflows/
 │   ├── build.yml                # 自动构建工作流（定时 + 手动）
-│   └── build-data10g.yml        # 数据版构建（rootfs 缩 10G 留出存储空间）
+│   └── build-sys12g.yml         # 数据版构建（系统 12G + 数据自适应 + 预装软件）
 ├── dts/
 │   └── rk3588-elf2.dts           # ELF3588 专用设备树（已验证，含 USB3.0 quirk 修复）
 ├── scripts/
 │   ├── check-upstream.py         # 检测上游新镜像（按文件名+sha256 跟踪，不重复构建）
 │   ├── build-image.sh            # 构建脚本（复刻 4/29 手动流程）
-│   └── shrink-data10g.sh         # 缩分区脚本（系统 + 10G 数据空间版）
+│   ├── shrink-data10g.sh         # 数据版改造脚本（掐死 99% 脚本 + fnnas-tf 扩 12G + 预装）
+│   └── vendor/
+│       └── FnOS_Install_Desktop.sh  # XFCE 桌面安装脚本（vendor 固定版本）
 ├── state/
 │   └── last-built.txt            # 已构建记录（工作流自动维护）
 └── README.md
@@ -63,27 +65,34 @@ graph LR
 - 每天 10:00（北京时间）自动检查一次，有新版自动构建并发 Release（标准版 + 数据版两个镜像）
 - 打开仓库 **Releases** 页下载镜像：
   - `fnnas_rockchip_elf3588_k*.img.gz`（标准版：rootfs 自动扩满整盘）
-  - `fnnas_rockchip_elf3588_d10g_k*.img.gz`（数据版：rootfs 限 19G，尾部留 10G+ 未分配）
+  - `fnnas_rockchip_elf3588_sys12g_k*.img.gz`（数据版：rootfs 扩到 12G，尾部数据空间自适应，**已预装桌面/软件**）
 - 校验：`sha256sum -c SHA256SUMS`
 - 解压后按原方法烧写（dd 到 TF 卡 / eMMC 或 rk3588 烧写工具）
 
-> 提示：32G eMMC 设备建议用 **数据版（d10g）**——烧录后在飞牛
-> 「设置 → 存储空间管理 → 创建存储空间」即可用内置 eMMC 的 10G+ 空间；
+> 提示：32G eMMC 设备建议用 **数据版（sys12g）**——烧录后在飞牛
+> 「设置 → 存储空间管理 → 创建存储空间」即可用内置 eMMC 的 17G+ 空间；
 > 标准版 rootfs 会扩满整盘，没有剩余空间可建存储空间。
 >
-> **数据版原理**：fnnas 首次启动会调 `resize-rootfs.service`（/usr/sbin/fnnas-tf）
-> 自动扩展 rootfs，其上限由 `/etc/fnnas.conf` 的 `rootfs_limit_gib` 控制。
-> 数据版镜像只改这一个值（19），烧录后 fnnas-tf 把 rootfs 扩到 19G，
-> 剩余空间留作未分配，供飞牛创建存储空间——完全走官方机制，零分区操作。
+> **数据版原理（v3 方案）**：设备上 rootfs 扩展有两条机制——
+> ① fnnas-tf（官方，遵守 `/etc/fnnas.conf` 的 `rootfs_limit_gib` 受限策略）；
+> ② resize-rootfs.sh（飞牛自带，逻辑“Disk ≤ 28GB → 扩到 99%”，**不读配置**，
+>    会覆盖 ① 把 rootfs 扩满整盘——前两版失败根因）。
+> 数据版镜像直接：把 `resize-rootfs.sh` 改名掐死 + 把 service ExecStart 指回
+> fnnas-tf + fnnas.conf 置 `rootfs_limit_gib=12` + `rootfs_resize=yes`。
+> 烧录后 fnnas-tf 首启把 rootfs 扩到 12G，之后没人再动；尾部剩余空间
+> 全部未分配（32G 盘 ≈ 17G，128G 盘 ≈ 116G），供飞牛创建存储空间。
+>
+> **预装软件**（开箱即用）：XFCE 桌面 + XRDP + 中文字体、python3-tk、aiohttp
+> （构建时 qemu 模拟 arm64 chroot 安装，脚本 vendor 在 `scripts/vendor/`）。
 
 ### 3. Release 命名
 
 - 标准版 tag: `elf3588-<日期>`（如 `elf3588-2026.07.12`）
-- 数据版 tag: `elf3588-d10g-<日期>`（如 `elf3588-d10g-2026.07.12`）
+- 数据版 tag: `elf3588-sys12g-<日期>`（如 `elf3588-sys12g-2026.07.12`）
 - 标准版镜像: `fnnas_rockchip_elf3588_k<内核>_<日期>.img.gz`
-- 数据版镜像: `fnnas_rockchip_elf3588_d10g_k<内核>_<日期>.img.gz`
+- 数据版镜像: `fnnas_rockchip_elf3588_sys12g_k<内核>_<日期>.img.gz`
 
-> 数据版流水线（build-data10g.yml）由标准版成功后自动触发，无需手动干预。
+> 数据版流水线（build-sys12g.yml）由标准版成功后自动触发，无需手动干预。
 > 标准版产出的镜像内部文件名已统一为 elf3588（不再残留 orangepi-5-plus）。
 
 ## 常见问题

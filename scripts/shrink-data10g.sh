@@ -233,7 +233,7 @@ sudo umount "$MNT"
 sudo losetup -d "$LOOP"
 LOOP=""
 
-OUT_BASE="fnnas_rockchip_elf3588_d10g_k${KERNEL_VERSION}_${DATE}.img"
+OUT_BASE="fnnas_rockchip_elf3588_sys12g_k${KERNEL_VERSION}_${DATE}.img"
 mv "$IMG" "$OUT_BASE"
 gzip -9 -c "$OUT_BASE" > "$OUT/${OUT_BASE}.gz"
 rm -f "$OUT_BASE"

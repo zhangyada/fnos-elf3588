@@ -1,15 +1,16 @@
 # =============================================================================
-# Build ELF3588 FnOS Image (Data10G Variant) — 数据版镜像
+# Build ELF3588 FnOS Image (Sys12G Variant) — 数据版镜像（系统 12G + 数据自适应）
 #
-# 基于标准版构建产物（build.yml 的 elf3588-<date> Release），把 rootfs 缩小
-# DATA_GB（默认 10）GiB，磁盘尾部留出对应未分配空间，供飞牛创建存储空间。
+# 基于标准版构建产物（build.yml 的 elf3588-<date> Release），改造扩展机制：
+#   掐死飞牛 99% 扩展脚本（resize-rootfs.sh），保留 fnnas-tf（遵守配置）
+#   首启把 rootfs 扩到 12G；镜像保持小体积；预装桌面/软件（可选）。
 #
 # 触发：
 #   - 标准版 workflow 成功后自动跟跑（workflow_run）→ 每次上游更新自动出两个镜像
 #   - 手动触发（workflow_dispatch）→ 基于最新标准版资产构建
 #
-# 产出：fnnas_rockchip_elf3588_d10g_k<ver>_<date>.img.gz
-# 发布：独立 Release tag elf3588-d10g-<date>（与标准版隔离，避免并发写冲突）
+# 产出：fnnas_rockchip_elf3588_sys12g_k<ver>_<date>.img.gz
+# 发布：独立 Release tag elf3588-sys12g-<date>（与标准版隔离，避免并发写冲突）
 # =============================================================================
 name: ELF3588 FnOS 数据版镜像（系统12G+数据自适应）
 
@@ -29,7 +30,7 @@ permissions:
   issues: write                  # 需要：失败时发诊断到 issue
 
 concurrency:
-  group: fnos-elf3588-data10g
+  group: fnos-elf3588-sys12g
   cancel-in-progress: false
 
 jobs:
@@ -46,15 +47,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # 取最新非 d10g 的标准版 Release（tag 形如 elf3588-YYYY.MM.DD）
+          # 取最新标准版 Release（tag 严格匹配 elf3588-YYYY.MM.DD，排除一切变体）
           # 注意：gh release list 默认按创建时间排序，06.25 后建会在前；
           #       必须按 tagName（日期）字典序取最新，才能拿到最新镜像版本
           tag=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 30 \
             --json tagName 2>/dev/null | python3 -c "
-          import json, sys
+          import json, re, sys
           rels = json.load(sys.stdin)
           tags = sorted([r['tagName'] for r in rels
-                         if r['tagName'].startswith('elf3588-') and '-d10g-' not in r['tagName']],
+                         if re.fullmatch(r'elf3588-\\d{4}\\.\\d{2}\\.\\d{2}', r['tagName'])],
                         reverse=True)
           print(tags[0] if tags else '')
           ")
@@ -86,7 +87,7 @@ jobs:
             echo "::notice::force=true，跳过防重复检查，强制重建"
             echo "skip=false" >> "$GITHUB_OUTPUT"
           else
-            TAG="elf3588-d10g-$DATE"
+            TAG="elf3588-sys12g-$DATE"
             if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
               echo "::notice::数据版 $TAG 已存在（上游镜像未变化），跳过本次构建"
               echo "skip=true" >> "$GITHUB_OUTPUT"
@@ -142,7 +143,7 @@ jobs:
             --title "[自动] 数据版构建失败 run ${{ github.run_id }}" \
             --body-file diag.md || true
 
-      - name: 发布到 GitHub Release (elf3588-d10g-<date>)
+      - name: 发布到 GitHub Release (elf3588-sys12g-<date>)
         if: steps.ver.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -170,7 +171,7 @@ jobs:
             校验：sha256sum -c SHA256SUMS
         run: |
           cd out10g
-          TAG="elf3588-d10g-${{ steps.ver.outputs.date }}"
+          TAG="elf3588-sys12g-${{ steps.ver.outputs.date }}"
           TITLE="ELF3588 FnOS (系统12G+数据自适应) k${{ steps.ver.outputs.kver }}"
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             # 已存在：更新标题/描述（gh create 不会改已有 release 的 title/body）
