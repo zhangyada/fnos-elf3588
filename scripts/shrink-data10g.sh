@@ -1,21 +1,30 @@
 #!/usr/bin/env bash
 # =============================================================================
-# set-data10g.sh — 把标准版 ELF3588 镜像改造成 "系统 + 10G 数据空间" 版
+# shrink-data10g.sh — 把标准版 ELF3588 镜像改造成 "系统 18G + 数据 10G+" 版
 #
-# 原理（关键）：fnnas 首次启动时 resize-rootfs.service 会调用 /usr/sbin/fnnas-tf
-# 自动扩展 rootfs。它的扩展策略由 /etc/fnnas.conf 控制：
-#     rootfs_limit_gib="16"    # rootfs 大小上限（GiB）
-#     rootfs_resize="yes"      # 是否自动扩展
-# 盘容量 > limit 时走"受限策略"：rootfs 只扩到 limit 大小，剩余空间不分配！
+# 背景（踩坑结论）：仅改 /etc/fnnas.conf 的 rootfs_limit_gib 无效——
+# 设备上 resize-rootfs.service 实际调用的是飞牛自己的 resize-rootfs.sh，
+# 其逻辑是 "Disk <= 28GB → resize to 99%"，完全不读 fnnas.conf，
+# 会把 rootfs 扩满整盘。fnnas-tf 的受限策略被它覆盖。
 #
-# 本脚本只做一件事：把镜像 rootfs 里的 fnnas.conf 改为
-#     rootfs_limit_gib="19"    # 系统 19G（32GB 盘实际 29.8GiB → 剩余 ≥10G 给数据）
-# 烧录后首次启动，fnnas-tf 自动把 rootfs 扩到 19G，尾部留出 10G+ 未分配空间，
-# 飞牛「设置 → 存储空间管理 → 创建存储空间」即可使用内置 eMMC 空间。
+# 本脚本终极方案（不依赖设备上任何扩展机制）：
+#   1. truncate 镜像到 TARGET_DISK_GIB（模拟整盘，备份头落在盘内）
+#   2. parted 修复 GPT 备份头（truncate 清零）
+#   3. resizepart 把 rootfs 分区扩到 ROOTFS_GIB
+#   4. btrfs filesystem resize max 把文件系统扩满分区
+#   5. 删除/禁用一切扩展机制：
+#      - 移除 resize-rootfs.service（wants 链接 + 服务文件）
+#      - 把 /usr/sbin/fnnas-tf 与 /usr/sbin/resize-rootfs.sh 改名（谁调都找不到）
+#      - fnnas.conf 置 rootfs_resize=no
+#   6. 重打包发布
 #
-# 优势：不改分区表、不 resize2fs，完全走官方机制，且自适应任何盘容量。
+# 结果：烧录后 rootfs 就是 ROOTFS_GIB，扩展服务已死，尾部留出数据空间，
+#       飞牛「设置 → 存储空间管理 → 创建存储空间」可用内置 eMMC 剩余空间。
+#       数据空间 = 设备盘实际容量 - ROOTFS_GIB（32G 盘 ≈ 10.9G）。
 #
-# 所需环境变量：DATE（必填）、KERNEL_VERSION（可选）、LIMIT_GB（可选，默认 19）
+# 所需环境变量：
+#   DATE（必填，如 2026.07.12）、KERNEL_VERSION（可选）、
+#   ROOTFS_GIB（可选，默认 18，系统分区大小）、TARGET_DISK_GIB（可选，默认 28.6）
 # =============================================================================
 set -euo pipefail
 
@@ -25,14 +34,19 @@ OUT="$REPO_ROOT/out10g"
 
 : "${DATE:?缺少 DATE（标准版镜像日期，如 2026.07.12）}"
 KERNEL_VERSION="${KERNEL_VERSION:-unknown}"
-LIMIT_GB="${LIMIT_GB:-19}"       # rootfs 上限（GiB）；数据空间 = 盘实际 - LIMIT_GB
+ROOTFS_GIB="${ROOTFS_GIB:-18}"             # 系统分区大小（GiB）
+TARGET_DISK_GIB="${TARGET_DISK_GIB:-28.6}" # 镜像截断大小（GiB，须 < 设备盘实际容量）
 
 mkdir -p "$WORK" "$OUT"
 cd "$WORK"
 
+LOOP=""
+MNT="$WORK/mnt"
+mkdir -p "$MNT"
+
 # 出错时清理 loop 设备
 cleanup() {
-    if [ -n "${LOOP:-}" ]; then
+    if [ -n "$LOOP" ]; then
         sudo umount "$MNT" 2>/dev/null || true
         sudo losetup -d "$LOOP" 2>/dev/null || true
     fi
@@ -40,106 +54,139 @@ cleanup() {
 trap cleanup EXIT
 
 # ---------------------------------------------------------------------------
-# 1. 找到标准版镜像并解压（workflow 已下载到 WORK 目录）
+# 1. 解压标准版镜像
 # ---------------------------------------------------------------------------
-echo "::group::1/5 解压标准版镜像"
+echo "::group::1/6 解压标准版镜像"
 GZ=$(ls fnnas_rockchip_elf3588_*.img.gz 2>/dev/null | head -1 || true)
 [ -n "$GZ" ] || { echo "错误: 未找到标准版镜像 fnnas_rockchip_elf3588_*.img.gz"; exit 1; }
 echo "标准版镜像: $GZ"
 gzip -d "$GZ"
 IMG=$(ls *.img 2>/dev/null | head -1)
 [ -n "$IMG" ] || { echo "错误: 解压后未找到 .img 文件"; exit 1; }
-echo "解压得到: $IMG（内部文件名沿用镜像原始名，不影响操作）"
+echo "解压得到: $IMG"
 ls -lh "$IMG"
 echo "::endgroup::"
 
 # ---------------------------------------------------------------------------
-# 2. loop 挂载（带分区表）
+# 2. truncate 镜像到 TARGET_DISK_GIB（模拟整盘）
 # ---------------------------------------------------------------------------
-echo "::group::2/5 挂载 loop 设备"
-# 保险：确保 loop 模块已加载（runner 内核一般自带，失败忽略）
+echo "::group::2/6 truncate 镜像到 ${TARGET_DISK_GIB}GiB"
+TARGET_BYTES=$(awk "BEGIN{printf \"%d\", ${TARGET_DISK_GIB}*1024*1024*1024}")
+truncate -s "$TARGET_BYTES" "$IMG"
+echo "truncate 完成: $(ls -lh "$IMG" | awk '{print $5}')"
+echo "::endgroup::"
+
+# ---------------------------------------------------------------------------
+# 3. loop 挂载 + GPT 修复 + 分区扩展
+# ---------------------------------------------------------------------------
+echo "::group::3/6 挂载 loop 并扩展 rootfs 分区到 ${ROOTFS_GIB}GiB"
 sudo modprobe loop 2>/dev/null || true
 LOOP=$(sudo losetup -fP --show "$IMG")
 echo "loop 设备: $LOOP"
 sleep 2
-# losetup -P 在某些内核环境不自动创建分区节点：用 partx 通知内核扫描兜底
 if ! sudo lsblk -no PATH "$LOOP" | grep -q "^${LOOP}p"; then
     echo "loop 分区节点未自动创建，partx -a 扫描..."
     sudo partx -a "$LOOP" 2>/dev/null || true
     sleep 2
 fi
 sudo lsblk -o NAME,SIZE,FSTYPE,LABEL "$LOOP"
-echo "::endgroup::"
 
-# ---------------------------------------------------------------------------
-# 3. 探测 rootfs 分区（最大的 ext4 分区）并挂载
-# ---------------------------------------------------------------------------
-echo "::group::3/5 挂载 rootfs"
-ROOTFS_PART=""
+# 修复 GPT 备份头（truncate 后失效）：parted 询问 Fix/Ignore 时回答 fix
+printf 'fix\n' | sudo parted ---pretend-input-tty "$LOOP" unit s print >/dev/null 2>&1 || true
+
+# 找到 rootfs 分区号（btrfs 优先，ext4 兜底；排除 BOOT）
+ROOTFS_PART_NUM=""
+ROOTFS_DEV=""
 BIGGEST=0
-# 用变量接收分区列表，grep 无匹配时 || true 保护（避免 set -e 静默退出）
 PARTS=$(sudo lsblk -no PATH "$LOOP" 2>/dev/null | grep "^${LOOP}p" || true)
 for p in $PARTS; do
-    [ -b "$p" ] || { echo "  跳过（非块设备）: $p"; continue; }
-    # 注意：loop 分区设备属于 root:disk，必须用 sudo 才能读 superblock
+    [ -b "$p" ] || continue
     fstype=$(sudo lsblk -no FSTYPE "$p" 2>/dev/null || true)
     [ -n "$fstype" ] || fstype=$(sudo blkid -s TYPE -o value "$p" 2>/dev/null || true)
     size=$(sudo lsblk -bno SIZE "$p" 2>/dev/null || true)
     label=$(sudo lsblk -no LABEL "$p" 2>/dev/null || true)
     echo "  $p: fs=${fstype:-?} size=${size:-?} label=${label:-?}"
-    # 跳过启动分区（label=BOOT），rootfs 只可能是 ext4/btrfs
     if [ "$label" = "BOOT" ] || [ "$label" = "boot" ]; then
-        echo "  跳过启动分区: $p"
-        continue
+        echo "  跳过启动分区"; continue
     fi
-    if [ "$fstype" = "ext4" ] || [ "$fstype" = "btrfs" ]; then
+    if [ "$fstype" = "btrfs" ] || [ "$fstype" = "ext4" ]; then
         if [ "${size:-0}" -gt "$BIGGEST" ]; then
-            ROOTFS_PART="$p"; BIGGEST="$size"; ROOTFS_FS="$fstype"
+            ROOTFS_DEV="$p"; BIGGEST="$size"
+            ROOTFS_PART_NUM=$(basename "$p" | grep -oE '[0-9]+$')
         fi
     fi
 done
-if [ -z "$ROOTFS_PART" ]; then
-    echo "错误: 未找到 rootfs 分区（ext4/btrfs，非 BOOT）。当前分区布局："
-    sudo lsblk -o NAME,SIZE,FSTYPE,LABEL "$LOOP" || true
-    exit 1
-fi
-echo "rootfs 分区: $ROOTFS_PART ($(( BIGGEST / 1024 / 1024 / 1024 ))G, $ROOTFS_FS)"
+[ -n "$ROOTFS_PART_NUM" ] || { echo "错误: 未找到 rootfs 分区"; exit 1; }
+echo "rootfs 分区: $ROOTFS_DEV (编号 $ROOTFS_PART_NUM)"
 
-MNT="$WORK/mnt"
-mkdir -p "$MNT"
-sudo mount "$ROOTFS_PART" "$MNT" || { echo "错误: mount $ROOTFS_PART 失败"; exit 1; }
-echo "已挂载: $ROOTFS_PART → $MNT"
-ls "$MNT/etc/fnnas.conf" 2>/dev/null && cat "$MNT/etc/fnnas.conf" || echo "（镜像内无 fnnas.conf，将新建）"
+# 扩展 rootfs 分区到 ROOTFS_GIB（parted 询问 Yes/No 时回答 Yes）
+printf 'Yes\n' | sudo parted ---pretend-input-tty "$LOOP" resizepart "$ROOTFS_PART_NUM" "${ROOTFS_GIB}GiB" 2>&1 || true
+sudo partx -u "$LOOP" 2>/dev/null || true
+sudo partprobe "$LOOP" 2>/dev/null || true
+sleep 2
+echo "--- 扩展后 ---"
+sudo lsblk -o NAME,SIZE,FSTYPE,LABEL "$LOOP"
 echo "::endgroup::"
 
 # ---------------------------------------------------------------------------
-# 4. 修改 /etc/fnnas.conf：rootfs_limit_gib=LIMIT_GB, rootfs_resize=yes
+# 4. 挂载 rootfs，扩展文件系统到分区大小（btrfs resize max）
 # ---------------------------------------------------------------------------
-echo "::group::4/5 写入 fnnas.conf（rootfs 上限 ${LIMIT_GB}G）"
+echo "::group::4/6 挂载 rootfs 并扩展文件系统"
+sudo mount "$ROOTFS_DEV" "$MNT" || { echo "错误: mount $ROOTFS_DEV 失败"; exit 1; }
+FSTYPE=$(sudo lsblk -no FSTYPE "$ROOTFS_DEV" | head -1)
+if [ "$FSTYPE" = "btrfs" ]; then
+    sudo btrfs filesystem resize max "$MNT"
+else
+    sudo e2fsck -f "$ROOTFS_DEV" || true
+    sudo resize2fs "$ROOTFS_DEV"
+fi
+df -h "$MNT"
+echo "::endgroup::"
+
+# ---------------------------------------------------------------------------
+# 5. 禁用一切扩展机制（删服务 + 改名工具 + fnnas.conf 置 no）
+# ---------------------------------------------------------------------------
+echo "::group::5/6 禁用扩展机制（服务/工具/配置）"
+# 5.1 删除 resize-rootfs 服务（wants 链接 + 服务文件）
+for f in \
+    "$MNT/etc/systemd/system/multi-user.target.wants/resize-rootfs.service" \
+    "$MNT/etc/systemd/system/resize-rootfs.service" \
+    "$MNT/lib/systemd/system/resize-rootfs.service" \
+    "$MNT/usr/lib/systemd/system/resize-rootfs.service"; do
+    if [ -e "$f" ]; then
+        sudo rm -f "$f" && echo "已删除: ${f#$MNT}"
+    fi
+done
+# 5.2 改名扩展工具（谁调用都找不到）
+for tool in fnnas-tf resize-rootfs.sh; do
+    if [ -e "$MNT/usr/sbin/$tool" ]; then
+        sudo mv "$MNT/usr/sbin/$tool" "$MNT/usr/sbin/$tool.disabled"
+        echo "已改名: /usr/sbin/$tool → $tool.disabled"
+    fi
+done
+# 5.3 fnnas.conf 置为禁用 + limit 与分区一致
 CONF="$MNT/etc/fnnas.conf"
 if [ -f "$CONF" ]; then
-    # 文件已存在：改 limit 值；补 rootfs_resize
     if grep -q '^rootfs_limit_gib=' "$CONF"; then
-        sudo sed -i "s|^rootfs_limit_gib=.*|rootfs_limit_gib=\"${LIMIT_GB}\"|" "$CONF"
+        sudo sed -i "s|^rootfs_limit_gib=.*|rootfs_limit_gib=\"${ROOTFS_GIB}\"|" "$CONF"
     else
-        echo "rootfs_limit_gib=\"${LIMIT_GB}\"" | sudo tee -a "$CONF" >/dev/null
+        echo "rootfs_limit_gib=\"${ROOTFS_GIB}\"" | sudo tee -a "$CONF" >/dev/null
     fi
     grep -q '^rootfs_resize=' "$CONF" \
-        && sudo sed -i "s|^rootfs_resize=.*|rootfs_resize=\"yes\"|" "$CONF" \
-        || echo 'rootfs_resize="yes"' | sudo tee -a "$CONF" >/dev/null
+        && sudo sed -i "s|^rootfs_resize=.*|rootfs_resize=\"no\"|" "$CONF" \
+        || echo 'rootfs_resize="no"' | sudo tee -a "$CONF" >/dev/null
 else
-    # 文件不存在：直接创建（fnnas-tf 的 init_var 默认值即如此）
-    printf 'rootfs_limit_gib="%s"\nrootfs_resize="yes"\n' "$LIMIT_GB" | sudo tee "$CONF" >/dev/null
+    printf 'rootfs_limit_gib="%s"\nrootfs_resize="no"\n' "$ROOTFS_GIB" | sudo tee "$CONF" >/dev/null
 fi
-echo "--- 修改后 ---"
+echo "--- 修改后 fnnas.conf ---"
 cat "$CONF"
 sync
 echo "::endgroup::"
 
 # ---------------------------------------------------------------------------
-# 5. 卸载 + 重命名 + 压缩 + 校验
+# 6. 卸载 + 重命名 + 压缩 + 校验
 # ---------------------------------------------------------------------------
-echo "::group::5/5 卸载并重新打包"
+echo "::group::6/6 卸载并重新打包"
 sudo umount "$MNT"
 sudo losetup -d "$LOOP"
 LOOP=""
@@ -158,5 +205,5 @@ echo ""
 echo "完成: $OUT/"
 cat SHA256SUMS
 echo ""
-echo "说明: 烧录后首次启动 fnnas-tf 会把 rootfs 扩到 ${LIMIT_GB}G，"
-echo "      剩余空间（≥10G）留作未分配，可在飞牛创建存储空间。"
+echo "说明: 烧录后 rootfs 固定 ${ROOTFS_GIB}G，扩展服务已禁用，"
+echo "      尾部 ${TARGET_DISK_GIB}-${ROOTFS_GIB}=$(awk "BEGIN{print ${TARGET_DISK_GIB}-${ROOTFS_GIB}}")G+ 未分配（设备盘越大越多）。"

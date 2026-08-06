@@ -88,14 +88,15 @@ jobs:
         if: steps.ver.outputs.skip != 'true'
         run: |
           sudo apt-get update
-          sudo apt-get install -y e2fsprogs
+          sudo apt-get install -y e2fsprogs btrfs-progs parted
 
       - name: 改 fnnas.conf（rootfs 限 19G，尾留 10G+ 数据空间）并重新打包
         if: steps.ver.outputs.skip != 'true'
         env:
           DATE: ${{ steps.ver.outputs.date }}
           KERNEL_VERSION: ${{ steps.ver.outputs.kver }}
-          LIMIT_GB: "19"
+          ROOTFS_GIB: "18"        # 系统分区大小（GiB）
+          TARGET_DISK_GIB: "28.6" # 镜像截断大小（须 < 设备 eMMC 实际容量）
         run: |
           cd work10g
           chmod +x ../scripts/shrink-data10g.sh
@@ -134,14 +135,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_NOTES: |-
-            标准版镜像基础上，把 /etc/fnnas.conf 的 rootfs_limit_gib 设为 19：
-            烧录后首次启动 fnnas-tf 只把 rootfs 扩到 19G，磁盘尾部留出 10G+ 未分配空间。
+            镜像级终极方案（不依赖设备上的扩展机制）：
+            - truncate 镜像到 28.6G，分区表修复
+            - rootfs 分区预先扩到 18G，文件系统扩满
+            - 禁用 resize-rootfs.service + 改名 fnnas-tf / resize-rootfs.sh
+              （设备上那个飞牛版脚本 "Disk<=28GB→99%" 已无法再运行）
 
-            安装后可在「设置 → 存储空间管理 → 创建存储空间」使用内置 eMMC 空间。
+            烧录后 rootfs 固定 18G，尾部留 ~10G 未分配空间，
+            可在「设置 → 存储空间管理 → 创建存储空间」使用内置 eMMC 空间。
 
             - 基础: ${{ steps.find.outputs.tag }}
             - 内核: k${{ steps.ver.outputs.kver }}
-            - rootfs 上限: 19G（数据空间 = 盘实际容量 - 19G ≥ 10G）
             - 烧写: 下载 *.img.gz 解压后 dd 或 rk3588 工具写入 TF 卡/eMMC
 
             校验：sha256sum -c SHA256SUMS
@@ -154,6 +158,6 @@ jobs:
           else
             gh release create "$TAG" SHA256SUMS *.img.gz \
               --repo "$GITHUB_REPOSITORY" \
-              --title "ELF3588 FnOS (系统19G+数据10G) k${{ steps.ver.outputs.kver }}" \
+              --title "ELF3588 FnOS (系统18G+数据10G) k${{ steps.ver.outputs.kver }}" \
               --notes "$RELEASE_NOTES"
           fi
