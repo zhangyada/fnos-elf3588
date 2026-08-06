@@ -100,8 +100,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y e2fsprogs btrfs-progs parted
+        # 注: 镜像保持 6.6G 小体积，不 truncate；烧录后由 fnnas-tf 按 fnnas.conf 扩到 12G
 
-      - name: 改 fnnas.conf（rootfs 限 19G，尾留 10G+ 数据空间）并重新打包
+      - name: 改造扩展机制（掐死 99% 脚本，fnnas.conf 限 ${ROOTFS_GIB}G）并重新打包
         if: steps.ver.outputs.skip != 'true'
         env:
           DATE: ${{ steps.ver.outputs.date }}
@@ -145,12 +146,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_NOTES: |-
-            镜像级终极方案（不依赖设备上的扩展机制），镜像保持小体积：
-            - rootfs 分区预先扩到 12G，文件系统扩满
-            - 禁用 resize-rootfs.service + 改名 fnnas-tf / resize-rootfs.sh
-              （设备上那个飞牛版脚本 "Disk<=28GB→99%" 已无法再运行）
+            小镜像方案（解压仅 ~6.6G，烧写快）：
+            - 镜像原样打包，不拉大体积
+            - 掐死飞牛 99% 扩展脚本（resize-rootfs.sh 改名）
+            - 保留 fnnas-tf（遵守配置）：首启自动把 rootfs 扩到 12G
+            - fnnas.conf: rootfs_limit_gib=12
 
-            烧录后 rootfs 固定 12G 不再变动，剩余空间全部未分配（自适应盘容量）：
+            烧录后 rootfs 自动扩到 12G 并固定，剩余空间全部未分配（自适应盘容量）：
             - 32G eMMC → 约 17G 数据空间
             - 128G 存储 → 约 116G 数据空间
             可在「设置 → 存储空间管理 → 创建存储空间」使用。
