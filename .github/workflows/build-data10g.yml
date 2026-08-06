@@ -107,7 +107,8 @@ jobs:
         env:
           DATE: ${{ steps.ver.outputs.date }}
           KERNEL_VERSION: ${{ steps.ver.outputs.kver }}
-          ROOTFS_GIB: "12"        # 系统分区大小（GiB）；数据空间 = 设备盘容量 - 12G，自适应
+          ROOTFS_GIB: "12"        # 系统分区目标大小（GiB），写进 fnnas.conf
+          PREINSTALL: "yes"       # 预装 XFCE 桌面 + XRDP + python3-tk + aiohttp（qemu chroot）
         run: |
           cd work10g
           chmod +x ../scripts/shrink-data10g.sh
@@ -151,6 +152,11 @@ jobs:
             - 掐死飞牛 99% 扩展脚本（resize-rootfs.sh 改名）
             - 保留 fnnas-tf（遵守配置）：首启自动把 rootfs 扩到 12G
             - fnnas.conf: rootfs_limit_gib=12
+
+            **已预装（开箱即用，无需手动安装）**：
+            - XFCE 桌面 + XRDP + 中文字体（Debian 12，中文 locale）
+            - python3-tk
+            - aiohttp（pip，--break-system-packages）
 
             烧录后 rootfs 自动扩到 12G 并固定，剩余空间全部未分配（自适应盘容量）：
             - 32G eMMC → 约 17G 数据空间

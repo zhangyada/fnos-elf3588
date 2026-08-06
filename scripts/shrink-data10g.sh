@@ -35,6 +35,7 @@ OUT="$REPO_ROOT/out10g"
 : "${DATE:?缺少 DATE（标准版镜像日期，如 2026.07.12）}"
 KERNEL_VERSION="${KERNEL_VERSION:-unknown}"
 ROOTFS_GIB="${ROOTFS_GIB:-12}"       # fnnas.conf 的 rootfs_limit_gib（GiB）
+PREINSTALL="${PREINSTALL:-yes}"      # 是否预装桌面/软件（qemu chroot）
 
 mkdir -p "$WORK" "$OUT"
 cd "$WORK"
@@ -55,7 +56,7 @@ trap cleanup EXIT
 # ---------------------------------------------------------------------------
 # 1. 解压标准版镜像（保持 6.6G 小体积，不做任何 truncate）
 # ---------------------------------------------------------------------------
-echo "::group::1/5 解压标准版镜像"
+echo "::group::1/6 解压标准版镜像"
 GZ=$(ls fnnas_rockchip_elf3588_*.img.gz 2>/dev/null | head -1 || true)
 [ -n "$GZ" ] || { echo "错误: 未找到标准版镜像 fnnas_rockchip_elf3588_*.img.gz"; exit 1; }
 echo "标准版镜像: $GZ"
@@ -69,7 +70,7 @@ echo "::endgroup::"
 # ---------------------------------------------------------------------------
 # 2. loop 挂载，定位 rootfs 分区
 # ---------------------------------------------------------------------------
-echo "::group::2/5 挂载 loop 并定位 rootfs 分区"
+echo "::group::2/6 挂载 loop 并定位 rootfs 分区"
 sudo modprobe loop 2>/dev/null || true
 LOOP=$(sudo losetup -fP --show "$IMG")
 echo "loop 设备: $LOOP"
@@ -110,7 +111,7 @@ echo "::endgroup::"
 # ---------------------------------------------------------------------------
 # 3. 挂载 rootfs，诊断现有扩展机制
 # ---------------------------------------------------------------------------
-echo "::group::3/5 挂载 rootfs 并诊断扩展机制"
+echo "::group::3/6 挂载 rootfs 并诊断扩展机制"
 sudo mount "$ROOTFS_DEV" "$MNT" || { echo "错误: mount $ROOTFS_DEV 失败"; exit 1; }
 
 echo "--- resize-rootfs.service 文件 ---"
@@ -136,7 +137,7 @@ echo "::endgroup::"
 # ---------------------------------------------------------------------------
 # 4. 掐死 99% 元凶 + 让 service 指向 fnnas-tf + fnnas.conf 设 limit
 # ---------------------------------------------------------------------------
-echo "::group::4/5 改造扩展机制（保留 fnnas-tf，掐死 resize-rootfs.sh）"
+echo "::group::4/6 改造扩展机制（保留 fnnas-tf，掐死 resize-rootfs.sh）"
 # 4.1 改名 resize-rootfs.sh（99% 元凶）
 if [ -e "$MNT/usr/sbin/resize-rootfs.sh" ]; then
     sudo mv "$MNT/usr/sbin/resize-rootfs.sh" "$MNT/usr/sbin/resize-rootfs.sh.disabled"
@@ -177,9 +178,57 @@ sync
 echo "::endgroup::"
 
 # ---------------------------------------------------------------------------
-# 5. 卸载 + 重命名 + 压缩 + 校验
+# 5. 预装软件（XFCE 桌面 + XRDP + python3-tk + aiohttp），默认开启
+#    runner 为 x86_64，镜像 rootfs 为 arm64 → qemu-user + chroot 模拟安装
 # ---------------------------------------------------------------------------
-echo "::group::5/5 卸载并重新打包"
+echo "::group::5/6 预装软件（qemu chroot: 桌面 + python3-tk + aiohttp）"
+if [ "$PREINSTALL" = "yes" ]; then
+    # 5.1 安装 qemu-user-static 并注册 binfmt（arm64 模拟）
+    sudo apt-get update
+    sudo apt-get install -y qemu-user-static binfmt-support
+    sudo systemctl restart systemd-binfmt 2>/dev/null || sudo update-binfmts --enable qemu-aarch64 2>/dev/null || true
+    sudo cp /usr/bin/qemu-aarch64-static "$MNT/usr/bin/" 2>/dev/null || true
+
+    # 5.2 挂载虚拟文件系统 + DNS（chroot 需要）
+    sudo mount --bind /dev "$MNT/dev"
+    sudo mount --bind /dev/pts "$MNT/dev/pts"
+    sudo mount --bind /proc "$MNT/proc"
+    sudo mount --bind /sys "$MNT/sys"
+    sudo cp /etc/resolv.conf "$MNT/etc/resolv.conf" 2>/dev/null || true
+
+    # 5.3 拷贝安装脚本（vendor 版 + 补充包），chroot 里执行
+    sudo cp "$REPO_ROOT/scripts/vendor/FnOS_Install_Desktop.sh" "$MNT/tmp/"
+    # chroot 无运行中的 systemd：restart 替换为 true（enable 保留 → xrdp 开机自启）
+    sudo sed -i 's|systemctl restart xrdp-sesman"|true"|; s|systemctl restart xrdp"|true"|' "$MNT/tmp/FnOS_Install_Desktop.sh"
+    cat > /tmp/preinstall_extra.sh <<'EOF'
+#!/bin/bash
+set -e
+export DEBIAN_FRONTEND=noninteractive
+bash /tmp/FnOS_Install_Desktop.sh
+apt-get install -y python3-tk python3-pip
+pip install aiohttp --break-system-packages
+EOF
+    sudo cp /tmp/preinstall_extra.sh "$MNT/tmp/"
+
+    echo "开始 chroot 安装（qemu 模拟 arm64，桌面安装约需 15-25 分钟）..."
+    sudo chroot "$MNT" /bin/bash /tmp/preinstall_extra.sh
+
+    # 5.4 清理（防止 qemu 残留/污染镜像）
+    sudo rm -f "$MNT/tmp/FnOS_Install_Desktop.sh" "$MNT/tmp/preinstall_extra.sh" "$MNT/usr/bin/qemu-aarch64-static"
+    sudo umount "$MNT/dev/pts" 2>/dev/null || true
+    sudo umount "$MNT/dev" 2>/dev/null || true
+    sudo umount "$MNT/proc" 2>/dev/null || true
+    sudo umount "$MNT/sys" 2>/dev/null || true
+    echo "预装完成: XFCE + XRDP + python3-tk + aiohttp"
+else
+    echo "PREINSTALL=no，跳过预装"
+fi
+echo "::endgroup::"
+
+# ---------------------------------------------------------------------------
+# 6. 卸载 + 重命名 + 压缩 + 校验
+# ---------------------------------------------------------------------------
+echo "::group::6/6 卸载并重新打包"
 sudo umount "$MNT"
 sudo losetup -d "$LOOP"
 LOOP=""
@@ -200,4 +249,7 @@ cat SHA256SUMS
 echo ""
 echo "说明: 镜像保持小体积（解压后 $(ls -lh *.img.gz | awk '{print $5}') 压缩包），烧录后首次启动 fnnas-tf 按"
 echo "      fnnas.conf 把 rootfs 扩到 ${ROOTFS_GIB}G（受限策略，99% 元凶已死）。"
+if [ "$PREINSTALL" = "yes" ]; then
+  echo "      已预装: XFCE 桌面 + XRDP + 中文字体 + python3-tk + aiohttp（开箱即用）"
+fi
 echo "      数据空间 = 设备盘容量 - ${ROOTFS_GIB}G（32G 盘 ≈ ${ROOTFS_GIB}G 系统 + ~$((32 - ROOTFS_GIB))G 数据；128G 盘 ≈ ${ROOTFS_GIB}G 系统 + ~$((128 - ROOTFS_GIB))G 数据）"
