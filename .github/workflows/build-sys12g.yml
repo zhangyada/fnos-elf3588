@@ -2,7 +2,7 @@
 # Build ELF3588 FnOS Image (Sys12G Variant) — 数据版镜像（系统 12G + 数据自适应）
 #
 # 基于标准版构建产物（build.yml 的 elf3588-<date> Release），改造扩展机制：
-#   掐死飞牛 99% 扩展脚本（resize-rootfs.sh），保留 fnnas-tf（遵守配置）
+#   停用越权扩展脚本（resize-rootfs.sh），保留 fnnas-tf（遵守配置）
 #   首启把 rootfs 扩到 12G；镜像保持小体积；预装桌面/软件（可选）。
 #
 # 触发：
@@ -103,7 +103,7 @@ jobs:
           sudo apt-get install -y e2fsprogs btrfs-progs parted
         # 注: 镜像保持 6.6G 小体积，不 truncate；烧录后由 fnnas-tf 按 fnnas.conf 扩到 12G
 
-      - name: 改造扩展机制（掐死 99% 脚本，fnnas.conf 限 ${ROOTFS_GIB}G）并重新打包
+      - name: 改造扩展机制（停用越权脚本，fnnas.conf 限 ${ROOTFS_GIB}G）并重新打包
         if: steps.ver.outputs.skip != 'true'
         env:
           DATE: ${{ steps.ver.outputs.date }}
@@ -150,7 +150,7 @@ jobs:
           RELEASE_NOTES: |-
             小镜像方案（解压仅 ~6.6G，烧写快）：
             - 镜像原样打包，不拉大体积
-            - 掐死飞牛 99% 扩展脚本（resize-rootfs.sh 改名）
+            - 停用飞牛越权扩展脚本（resize-rootfs.sh 改名）
             - 保留 fnnas-tf（遵守配置）：首启自动把 rootfs 扩到 12G
             - fnnas.conf: rootfs_limit_gib=12
 

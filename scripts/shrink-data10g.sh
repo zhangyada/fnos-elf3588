@@ -8,18 +8,18 @@
 #        盘 > limit 时只扩到 limit 大小（受限策略）。已验证在用户设备上
 #        成功把分区从 6.4G 扩到 19G。
 #     2. resize-rootfs.sh（飞牛自己的脚本）——逻辑 "Disk <= 28GB → resize to 99%"，
-#        不读 fnnas.conf，在 fnnas-tf 之后把 rootfs 再扩满整盘（元凶）。
+#        不读 fnnas.conf，在 fnnas-tf 之后把 rootfs 再扩满整盘（越权扩展）。
 #
 # 本脚本（镜像保持 6.6G 小体积，不 truncate）：
 #   1. 解压标准版镜像（原样，分区 6.4G）
 #   2. 挂载 rootfs
-#   3. 把 /usr/sbin/resize-rootfs.sh 改名（掐死 99% 元凶）
+#   3. 把 /usr/sbin/resize-rootfs.sh 改名停用（越权扩展脚本）
 #   4. 把 resize-rootfs.service 的 ExecStart 改回 fnnas-tf（如果指向 resize-rootfs.sh）
 #   5. fnnas.conf 置 rootfs_limit_gib=${ROOTFS_GIB} + rootfs_resize="yes"
 #   6. 重打包发布
 #
 # 结果：烧录后首次启动 fnnas-tf 自动把 rootfs 扩到 ${ROOTFS_GIB}G（受限策略），
-#       元凶脚本已死，不会再有 99% 扩展。镜像尾部到盘尾全部未分配：
+#       越权脚本已停用，rootfs 保持 ${ROOTFS_GIB}G 不再变化。镜像尾部到盘尾全部未分配：
 #       32G 盘 → ~17G 数据；128G 盘 → ~116G 数据（自适应盘容量）。
 #
 # 所需环境变量：
@@ -135,10 +135,10 @@ done
 echo "::endgroup::"
 
 # ---------------------------------------------------------------------------
-# 4. 掐死 99% 元凶 + 让 service 指向 fnnas-tf + fnnas.conf 设 limit
+# 4. 停用越权扩展脚本 + 让 service 指向 fnnas-tf + fnnas.conf 设 limit
 # ---------------------------------------------------------------------------
-echo "::group::4/6 改造扩展机制（保留 fnnas-tf，掐死 resize-rootfs.sh）"
-# 4.1 改名 resize-rootfs.sh（99% 元凶）
+echo "::group::4/6 改造扩展机制（保留 fnnas-tf，停用 resize-rootfs.sh）"
+# 4.1 改名 resize-rootfs.sh（越权扩展脚本）
 if [ -e "$MNT/usr/sbin/resize-rootfs.sh" ]; then
     sudo mv "$MNT/usr/sbin/resize-rootfs.sh" "$MNT/usr/sbin/resize-rootfs.sh.disabled"
     echo "已改名: /usr/sbin/resize-rootfs.sh → resize-rootfs.sh.disabled"
@@ -248,7 +248,7 @@ echo "完成: $OUT/"
 cat SHA256SUMS
 echo ""
 echo "说明: 镜像保持小体积（解压后 $(ls -lh *.img.gz | awk '{print $5}') 压缩包），烧录后首次启动 fnnas-tf 按"
-echo "      fnnas.conf 把 rootfs 扩到 ${ROOTFS_GIB}G（受限策略，99% 元凶已死）。"
+echo "      fnnas.conf 把 rootfs 扩到 ${ROOTFS_GIB}G（受限策略，越权脚本已停用）。"
 if [ "$PREINSTALL" = "yes" ]; then
   echo "      已预装: XFCE 桌面 + XRDP + 中文字体 + python3-tk + aiohttp（开箱即用）"
 fi

@@ -31,7 +31,7 @@ graph LR
 ├── scripts/
 │   ├── check-upstream.py         # 检测上游新镜像（按文件名+sha256 跟踪，不重复构建）
 │   ├── build-image.sh            # 构建脚本（复刻 4/29 手动流程）
-│   ├── shrink-data10g.sh         # 数据版改造脚本（掐死 99% 脚本 + fnnas-tf 扩 12G + 预装）
+│   ├── shrink-data10g.sh         # 数据版改造脚本（停用越权扩展 + fnnas-tf 扩 12G + 预装）
 │   └── vendor/
 │       └── FnOS_Install_Desktop.sh  # XFCE 桌面安装脚本（vendor 固定版本）
 ├── state/
@@ -72,20 +72,47 @@ graph LR
 > 提示：32G eMMC 设备建议用 **数据版（sys12g）**——烧录后在飞牛
 > 「设置 → 存储空间管理 → 创建存储空间」即可用内置 eMMC 的 17G+ 空间；
 > 标准版 rootfs 会扩满整盘，没有剩余空间可建存储空间。
+> （sys12g 方案已在真机验证：rootfs 12G + 数据空间正常 + 预装软件可用）
 >
 > **数据版原理（v3 方案）**：设备上 rootfs 扩展有两条机制——
 > ① fnnas-tf（官方，遵守 `/etc/fnnas.conf` 的 `rootfs_limit_gib` 受限策略）；
 > ② resize-rootfs.sh（飞牛自带，逻辑“Disk ≤ 28GB → 扩到 99%”，**不读配置**，
 >    会覆盖 ① 把 rootfs 扩满整盘——前两版失败根因）。
-> 数据版镜像直接：把 `resize-rootfs.sh` 改名掐死 + 把 service ExecStart 指回
+> 数据版镜像直接：把 `resize-rootfs.sh` 改名停用 + 把 service ExecStart 指回
 > fnnas-tf + fnnas.conf 置 `rootfs_limit_gib=12` + `rootfs_resize=yes`。
-> 烧录后 fnnas-tf 首启把 rootfs 扩到 12G，之后没人再动；尾部剩余空间
+> 烧录后 fnnas-tf 首启把 rootfs 扩到 12G，rootfs 大小保持固定；尾部剩余空间
 > 全部未分配（32G 盘 ≈ 17G，128G 盘 ≈ 116G），供飞牛创建存储空间。
 >
 > **预装软件**（开箱即用）：XFCE 桌面 + XRDP + 中文字体、python3-tk、aiohttp
 > （构建时 qemu 模拟 arm64 chroot 安装，脚本 vendor 在 `scripts/vendor/`）。
 
-### 3. Release 命名
+### 3. 烧写方法（RKDevTool，eMMC）
+
+> 图片为实际烧写过程截图（RKDevTool v3.32，Loader v1.11），与下述步骤对应。
+
+**物料**：解压后的 `*.img` + `MiniLoaderAll.bin`（G 盘镜像目录内）
+
+**步骤**：
+1. **解压**：`tar -xzf xxx.img.gz`（或 Etcher 直接烧录 .gz；不要用 7-Zip 双击解压，会把 .img 解成目录）
+2. 打开瑞芯微开发工具（RKDevTool）→ **升级固件** 标签页
+3. **Loader** 栏选择 `MiniLoaderAll.bin`（版本 1.11）
+4. **固件** 栏选择解压好的 `.img`（地址 0x00000000）
+5. 设备通过 USB 连接并进入 **Maskrom 模式**（或 Loader 模式），工具显示"发现一个 Maskrom 设备"
+6. 点 **开始**（升级固件，强制按地址写）
+
+**烧写日志流程**（截图可见）：
+
+```
+下载 Boot → 等待 Maskrom → 测试设备 → 校验芯片 → 获取 Flash 信息
+→ 准备 IDB → 下载 IDB → 切换存储到 EMMC → 下载固件 → 完成
+```
+
+**烧写后验证**：
+- `lsblk` 应看到 `mmcblk0p2` 约 12G（rootfs），尾部剩余未分配
+- 飞牛「设置 → 存储空间管理 → 创建存储空间」使用剩余空间（32G 盘约 17G）
+- XFCE 桌面 / XRDP / python3-tk / aiohttp 已预装，可直接使用
+
+### 4. Release 命名
 
 - 标准版 tag: `elf3588-<日期>`（如 `elf3588-2026.07.12`）
 - 数据版 tag: `elf3588-sys12g-<日期>`（如 `elf3588-sys12g-2026.07.12`）
