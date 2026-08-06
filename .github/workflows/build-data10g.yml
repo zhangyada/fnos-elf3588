@@ -11,7 +11,7 @@
 # 产出：fnnas_rockchip_elf3588_d10g_k<ver>_<date>.img.gz
 # 发布：独立 Release tag elf3588-d10g-<date>（与标准版隔离，避免并发写冲突）
 # =============================================================================
-name: Build ELF3588 FnOS Image (Data10G)
+name: ELF3588 FnOS 数据版镜像（系统12G+数据自适应）
 
 "on":
   workflow_run:
