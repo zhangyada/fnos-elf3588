@@ -106,7 +106,7 @@ jobs:
         env:
           DATE: ${{ steps.ver.outputs.date }}
           KERNEL_VERSION: ${{ steps.ver.outputs.kver }}
-          ROOTFS_GIB: "8"         # 系统分区大小（GiB）；数据空间 = 设备盘容量 - 8G，自适应
+          ROOTFS_GIB: "12"        # 系统分区大小（GiB）；数据空间 = 设备盘容量 - 12G，自适应
         run: |
           cd work10g
           chmod +x ../scripts/shrink-data10g.sh
@@ -146,13 +146,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_NOTES: |-
             镜像级终极方案（不依赖设备上的扩展机制），镜像保持小体积：
-            - rootfs 分区预先扩到 8G，文件系统扩满
+            - rootfs 分区预先扩到 12G，文件系统扩满
             - 禁用 resize-rootfs.service + 改名 fnnas-tf / resize-rootfs.sh
               （设备上那个飞牛版脚本 "Disk<=28GB→99%" 已无法再运行）
 
-            烧录后 rootfs 固定 8G 不再变动，剩余空间全部未分配（自适应盘容量）：
-            - 32G eMMC → 约 21G 数据空间
-            - 128G 存储 → 约 120G 数据空间
+            烧录后 rootfs 固定 12G 不再变动，剩余空间全部未分配（自适应盘容量）：
+            - 32G eMMC → 约 17G 数据空间
+            - 128G 存储 → 约 116G 数据空间
             可在「设置 → 存储空间管理 → 创建存储空间」使用。
 
             - 基础: ${{ steps.find.outputs.tag }}
@@ -169,6 +169,6 @@ jobs:
           else
             gh release create "$TAG" SHA256SUMS *.img.gz \
               --repo "$GITHUB_REPOSITORY" \
-              --title "ELF3588 FnOS (系统8G+数据自适应) k${{ steps.ver.outputs.kver }}" \
+              --title "ELF3588 FnOS (系统12G+数据自适应) k${{ steps.ver.outputs.kver }}" \
               --notes "$RELEASE_NOTES"
           fi
