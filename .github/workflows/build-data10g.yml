@@ -165,12 +165,15 @@ jobs:
         run: |
           cd out10g
           TAG="elf3588-d10g-${{ steps.ver.outputs.date }}"
+          TITLE="ELF3588 FnOS (系统12G+数据自适应) k${{ steps.ver.outputs.kver }}"
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            # 已存在：更新标题/描述（gh create 不会改已有 release 的 title/body）
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --notes "$RELEASE_NOTES"
             gh release upload "$TAG" SHA256SUMS *.img.gz \
               --repo "$GITHUB_REPOSITORY" --clobber
           else
             gh release create "$TAG" SHA256SUMS *.img.gz \
               --repo "$GITHUB_REPOSITORY" \
-              --title "ELF3588 FnOS (系统12G+数据自适应) k${{ steps.ver.outputs.kver }}" \
+              --title "$TITLE" \
               --notes "$RELEASE_NOTES"
           fi
