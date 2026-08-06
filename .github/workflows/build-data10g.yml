@@ -17,7 +17,12 @@ name: Build ELF3588 FnOS Image (Data10G)
   workflow_run:
     workflows: ["Build ELF3588 FnOS Image"]
     types: [completed]
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "强制重新构建（忽略防重复，用于方案升级后重建）"
+        type: boolean
+        default: false
 
 permissions:
   contents: write                # 需要：创建/更新 Release
@@ -66,6 +71,7 @@ jobs:
         id: ver
         env:
           GH_TOKEN: ${{ github.token }}
+          FORCE: ${{ inputs.force || 'false' }}
         run: |
           F=$(ls work10g/fnnas_rockchip_elf3588_*.img.gz | head -1)
           BASE=$(basename "$F" .img.gz)
@@ -75,13 +81,18 @@ jobs:
           echo "内核: $KVER | 日期: $DATE"
           echo "kver=$KVER" >> "$GITHUB_OUTPUT"
           echo "date=$DATE" >> "$GITHUB_OUTPUT"
-          # 防重复：数据版 tag 已存在（上游镜像未变化）则跳过后续步骤
-          TAG="elf3588-d10g-$DATE"
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "::notice::数据版 $TAG 已存在（上游镜像未变化），跳过本次构建"
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
+          # 防重复：数据版 tag 已存在（上游镜像未变化）则跳过后续步骤；force=true 时跳过检查
+          if [ "$FORCE" = "true" ]; then
+            echo "::notice::force=true，跳过防重复检查，强制重建"
             echo "skip=false" >> "$GITHUB_OUTPUT"
+          else
+            TAG="elf3588-d10g-$DATE"
+            if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "::notice::数据版 $TAG 已存在（上游镜像未变化），跳过本次构建"
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "skip=false" >> "$GITHUB_OUTPUT"
+            fi
           fi
 
       - name: 安装分区工具
