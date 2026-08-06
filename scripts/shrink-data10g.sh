@@ -207,7 +207,7 @@ cat SHA256SUMS
 echo ""
 echo "说明: 烧录后 rootfs 固定 ${ROOTFS_GIB}G，扩展服务已禁用；"
 if [ "${ROOTFS_GIB}" -ge 18 ]; then
-  echo "      数据空间 = 设备盘容量 - ${ROOTFS_GIB}G（32G 盘 ≈ $((ROOTFS_GIB))G 系统 + ~11G 数据）"
+  echo "      数据空间 = 设备盘容量 - ${ROOTFS_GIB}G（32G 盘 ≈ ${ROOTFS_GIB}G 系统 + ~$((32 - ROOTFS_GIB))G 数据）"
 else
-  echo "      数据空间 = 设备盘容量 - ${ROOTFS_GIB}G（32G 盘 ≈ 8G 系统 + ~21G 数据；128G 盘 ≈ 8G 系统 + ~120G 数据）"
+  echo "      数据空间 = 设备盘容量 - ${ROOTFS_GIB}G（32G 盘 ≈ ${ROOTFS_GIB}G 系统 + ~$((32 - ROOTFS_GIB))G 数据；128G 盘 ≈ ${ROOTFS_GIB}G 系统 + ~$((128 - ROOTFS_GIB))G 数据）"
 fi
