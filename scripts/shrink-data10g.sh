@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# shrink-data10g.sh — 把标准版 ELF3588 镜像改造成 "系统 18G + 数据 10G+" 版
+# shrink-data10g.sh — 把标准版 ELF3588 镜像改造成 "系统 8G + 数据自适应" 版
 #
 # 背景（踩坑结论）：仅改 /etc/fnnas.conf 的 rootfs_limit_gib 无效——
 # 设备上 resize-rootfs.service 实际调用的是飞牛自己的 resize-rootfs.sh，
@@ -8,23 +8,23 @@
 # 会把 rootfs 扩满整盘。fnnas-tf 的受限策略被它覆盖。
 #
 # 本脚本终极方案（不依赖设备上任何扩展机制）：
-#   1. truncate 镜像到 TARGET_DISK_GIB（模拟整盘，备份头落在盘内）
-#   2. parted 修复 GPT 备份头（truncate 清零）
-#   3. resizepart 把 rootfs 分区扩到 ROOTFS_GIB
-#   4. btrfs filesystem resize max 把文件系统扩满分区
-#   5. 删除/禁用一切扩展机制：
+#   1. 镜像只拉长到 ROOTFS_GIB+少量余量（保持小镜像，不是整盘！）
+#   2. parted 修复 GPT 备份头 + resizepart 把 rootfs 分区扩到 ROOTFS_GIB
+#   3. btrfs filesystem resize max 把文件系统扩满分区
+#   4. 禁用一切扩展机制：
 #      - 移除 resize-rootfs.service（wants 链接 + 服务文件）
 #      - 把 /usr/sbin/fnnas-tf 与 /usr/sbin/resize-rootfs.sh 改名（谁调都找不到）
 #      - fnnas.conf 置 rootfs_resize=no
-#   6. 重打包发布
+#   5. 重打包发布
 #
-# 结果：烧录后 rootfs 就是 ROOTFS_GIB，扩展服务已死，尾部留出数据空间，
-#       飞牛「设置 → 存储空间管理 → 创建存储空间」可用内置 eMMC 剩余空间。
-#       数据空间 = 设备盘实际容量 - ROOTFS_GIB（32G 盘 ≈ 10.9G）。
+# 结果：烧录后 rootfs 固定 ROOTFS_GIB，扩展服务已死，
+#       从镜像尾部到设备盘末尾全部是未分配空间（**自适应盘容量**）：
+#       32G 盘 → ~21G 数据；128G 盘 → ~120G 数据。
+#       飞牛「设置 → 存储空间管理 → 创建存储空间」即可使用。
 #
 # 所需环境变量：
 #   DATE（必填，如 2026.07.12）、KERNEL_VERSION（可选）、
-#   ROOTFS_GIB（可选，默认 18，系统分区大小）、TARGET_DISK_GIB（可选，默认 28.6）
+#   ROOTFS_GIB（可选，默认 8，系统分区大小）
 # =============================================================================
 set -euo pipefail
 
@@ -34,8 +34,9 @@ OUT="$REPO_ROOT/out10g"
 
 : "${DATE:?缺少 DATE（标准版镜像日期，如 2026.07.12）}"
 KERNEL_VERSION="${KERNEL_VERSION:-unknown}"
-ROOTFS_GIB="${ROOTFS_GIB:-18}"             # 系统分区大小（GiB）
-TARGET_DISK_GIB="${TARGET_DISK_GIB:-28.6}" # 镜像截断大小（GiB，须 < 设备盘实际容量）
+ROOTFS_GIB="${ROOTFS_GIB:-8}"             # 系统分区大小（GiB）
+# 镜像拉长到 ROOTFS_GIB + 4MiB（余量给 GPT 备份头）——保持小镜像
+TARGET_BYTES=$((ROOTFS_GIB * 1024 * 1024 * 1024 + 4 * 1024 * 1024))
 
 mkdir -p "$WORK" "$OUT"
 cd "$WORK"
@@ -68,10 +69,9 @@ ls -lh "$IMG"
 echo "::endgroup::"
 
 # ---------------------------------------------------------------------------
-# 2. truncate 镜像到 TARGET_DISK_GIB（模拟整盘）
+# 2. 拉长镜像到 ROOTFS_GIB + 余量（保持小镜像，尾部零区留给扩展分区）
 # ---------------------------------------------------------------------------
-echo "::group::2/6 truncate 镜像到 ${TARGET_DISK_GIB}GiB"
-TARGET_BYTES=$(awk "BEGIN{printf \"%d\", ${TARGET_DISK_GIB}*1024*1024*1024}")
+echo "::group::2/6 拉长镜像到 ${ROOTFS_GIB}GiB + 余量"
 truncate -s "$TARGET_BYTES" "$IMG"
 echo "truncate 完成: $(ls -lh "$IMG" | awk '{print $5}')"
 echo "::endgroup::"
@@ -205,5 +205,9 @@ echo ""
 echo "完成: $OUT/"
 cat SHA256SUMS
 echo ""
-echo "说明: 烧录后 rootfs 固定 ${ROOTFS_GIB}G，扩展服务已禁用，"
-echo "      尾部 ${TARGET_DISK_GIB}-${ROOTFS_GIB}=$(awk "BEGIN{print ${TARGET_DISK_GIB}-${ROOTFS_GIB}}")G+ 未分配（设备盘越大越多）。"
+echo "说明: 烧录后 rootfs 固定 ${ROOTFS_GIB}G，扩展服务已禁用；"
+if [ "${ROOTFS_GIB}" -ge 18 ]; then
+  echo "      数据空间 = 设备盘容量 - ${ROOTFS_GIB}G（32G 盘 ≈ $((ROOTFS_GIB))G 系统 + ~11G 数据）"
+else
+  echo "      数据空间 = 设备盘容量 - ${ROOTFS_GIB}G（32G 盘 ≈ 8G 系统 + ~21G 数据；128G 盘 ≈ 8G 系统 + ~120G 数据）"
+fi
