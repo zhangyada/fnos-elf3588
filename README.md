@@ -69,7 +69,7 @@ graph LR
   - `fnnas_rockchip_elf3588_k*.img.gz`（标准版：rootfs 自动扩满整盘）
   - `fnnas_rockchip_elf3588_sys12g_k*.img.gz`（数据版：rootfs 扩到 12G，尾部数据空间自适应，**已预装桌面/软件**）
 - 校验：`sha256sum -c SHA256SUMS`
-- 解压后按原方法烧写（dd 到 TF 卡 / eMMC 或 rk3588 烧写工具）
+- 解压后按原方法烧写（RKDevTool 烧 eMMC，见下文）
 
 > 提示：32G eMMC 设备建议用 **数据版（sys12g）**——烧录后在飞牛
 > 「设置 → 存储空间管理 → 创建存储空间」即可用内置 eMMC 的 17G+ 空间；
@@ -88,11 +88,9 @@ graph LR
 > **预装软件**（开箱即用）：XFCE 桌面 + XRDP + 中文字体、python3-tk、aiohttp
 > （构建时 qemu 模拟 arm64 chroot 安装，脚本 vendor 在 `scripts/vendor/`）。
 
-### 3. 烧写方法
+### 3. 烧写方法（RKDevTool，eMMC）
 
-两种方式任选其一。**新手推荐方式一（TF 卡 dd），无需任何额外工具**。
-
-> 图片为实际烧写过程截图（RKDevTool v3.32，Loader v1.11），与方式二对应。
+> 图片为实际烧写过程截图（RKDevTool v3.32，Loader v1.11）。
 
 <img width="970" height="461" alt="烧写说明" src="https://github.com/user-attachments/assets/3c965a7e-0c2c-432c-87d9-c65c19fa1b3f" />
 
@@ -100,22 +98,6 @@ graph LR
 - 镜像：从 [Releases](../../releases) 下载 `*.img.gz`（标准版或数据版）
 - Loader：`MiniLoaderAll.bin`（烧写 eMMC 必需，随每个 Release 附带；也可从仓库 `assets/MiniLoaderAll.bin` 下载）
 - 校验：`sha256sum -c SHA256SUMS`
-
-#### 方式一：TF 卡 dd（最简单，推荐）
-
-1. 解压：`gzip -d xxx.img.gz`（得到 `.img`）
-2. 插入 TF 卡（数据版 rootfs 12G，推荐 32G 及以上）
-3. 找到设备：`lsblk` 确认 TF 卡设备名（如 `/dev/sda`；**务必看清，写错盘会毁数据**）
-4. 写入：
-   ```bash
-   sudo dd if=xxx.img of=/dev/sda bs=4M status=progress conv=fsync
-   sync
-   ```
-5. 拔出 TF 卡插入 ELF3588 卡槽，上电即可启动
-
-#### 方式二：RKDevTool 烧 eMMC（Windows）
-
-**物料**：解压后的 `*.img` + `MiniLoaderAll.bin`
 
 **步骤**：
 1. **解压**：`tar -xzf xxx.img.gz`（或 Etcher 直接烧录 .gz；不要用 7-Zip 双击解压，会把 .img 解成目录）
