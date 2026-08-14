@@ -100,7 +100,7 @@ graph LR
 - 校验：`sha256sum -c SHA256SUMS`
 
 **步骤**：
-1. **解压**：`tar -xzf xxx.img.gz`（或 Etcher 直接烧录 .gz；不要用 7-Zip 双击解压，会把 .img 解成目录）
+1. **解压**：`tar -xzf xxx.img.gz`（不要用 7-Zip 双击解压，会把 .img 解成目录）
 2. 打开瑞芯微开发工具（RKDevTool）→ **升级固件** 标签页
 3. **Loader** 栏选择 `MiniLoaderAll.bin`（版本 1.11）
 4. **固件** 栏选择解压好的 `.img`（地址 0x00000000）
