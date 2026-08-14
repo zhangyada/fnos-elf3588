@@ -143,6 +143,7 @@ graph LR
 （负责 DDR 初始化 + USB 下载），烧写 eMMC 时 RKDevTool 的「Loader」栏必须选它。
 
 - 本仓库提供 **v1.11** 版本（`assets/MiniLoaderAll.bin`），并随每个 Release 自动附带
+- SHA256：`35e2a464742ea0880106c1c0d879a43655adda40d9db8144df9f3efa2d4a593a`
 - 它**不是**从源码编译的，而是用瑞芯微 [rkbin](https://github.com/rockchip-linux/rkbin)
   仓库的预编译组件（DDR init + usbplug + SPL）通过 `boot_merger` 合并而成：
   ```bash
