@@ -94,13 +94,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cd out
+          # 把 MiniLoaderAll.bin（Loader）一并附到 Release，供 eMMC 烧写
+          cp "$GITHUB_WORKSPACE/assets/MiniLoaderAll.bin" .
+          (cd "$GITHUB_WORKSPACE/assets" && sha256sum MiniLoaderAll.bin) >> SHA256SUMS
           # 若 tag 已存在（如手动重跑），改为补充上传
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" SHA256SUMS *.img.gz \
+            gh release upload "$RELEASE_TAG" SHA256SUMS MiniLoaderAll.bin *.img.gz \
               --repo "$GITHUB_REPOSITORY" --clobber
           else
             gh release create "$RELEASE_TAG" \
-              SHA256SUMS *.img.gz \
+              SHA256SUMS MiniLoaderAll.bin *.img.gz \
               --repo "$GITHUB_REPOSITORY" \
               --title "ELF3588 FnOS $DATE (k$KERNEL_VERSION)" \
               --notes "面向 ELF3588 魔改的飞牛 FnOS 镜像。
@@ -108,7 +111,7 @@ jobs:
           - 上游: [ophub/fnnas](https://github.com/ophub/fnnas) tag \`$UPSTREAM_TAG\`
           - 内核: k$KERNEL_VERSION
           - 设备树: dts/rk3588-elf2.dts（ELF3588 专用，含 USB3.0 quirk 修复）
-          - 烧写: 下载 \`*.img.gz\` 解压后 dd 或 rk3588 工具写入 TF 卡/eMMC
+          - 烧写: 下载 \`*.img.gz\` 解压后 dd 或 rk3588 工具写入 TF 卡/eMMC；eMMC 烧写需一并下载 \`MiniLoaderAll.bin\`
 
           校验：\`sha256sum -c SHA256SUMS\`"
           fi

@@ -26,6 +26,8 @@ graph LR
 ├── .github/workflows/
 │   ├── build.yml                # 自动构建工作流（定时 + 手动）
 │   └── build-sys12g.yml         # 数据版构建（系统 12G + 数据自适应 + 预装软件）
+├── assets/
+│   └── MiniLoaderAll.bin          # 瑞芯微 RK3588 Loader v1.11（烧写 eMMC 必需）
 ├── dts/
 │   └── rk3588-elf2.dts           # ELF3588 专用设备树（已验证，含 USB3.0 quirk 修复）
 ├── scripts/
@@ -86,11 +88,32 @@ graph LR
 > **预装软件**（开箱即用）：XFCE 桌面 + XRDP + 中文字体、python3-tk、aiohttp
 > （构建时 qemu 模拟 arm64 chroot 安装，脚本 vendor 在 `scripts/vendor/`）。
 
-### 3. 烧写方法（RKDevTool，eMMC）
+### 3. 烧写方法
 
-> 图片为实际烧写过程截图（RKDevTool v3.32，Loader v1.11），与下述步骤对应。
+两种方式任选其一。**新手推荐方式一（TF 卡 dd），无需任何额外工具**。
+
+> 图片为实际烧写过程截图（RKDevTool v3.32，Loader v1.11），与方式二对应。
 
 <img width="970" height="461" alt="烧写说明" src="https://github.com/user-attachments/assets/3c965a7e-0c2c-432c-87d9-c65c19fa1b3f" />
+
+**物料下载**：
+- 镜像：从 [Releases](../../releases) 下载 `*.img.gz`（标准版或数据版）
+- Loader：`MiniLoaderAll.bin`（烧写 eMMC 必需，随每个 Release 附带；也可从仓库 `assets/MiniLoaderAll.bin` 下载）
+- 校验：`sha256sum -c SHA256SUMS`
+
+#### 方式一：TF 卡 dd（最简单，推荐）
+
+1. 解压：`gzip -d xxx.img.gz`（得到 `.img`）
+2. 插入 TF 卡（数据版 rootfs 12G，推荐 32G 及以上）
+3. 找到设备：`lsblk` 确认 TF 卡设备名（如 `/dev/sda`；**务必看清，写错盘会毁数据**）
+4. 写入：
+   ```bash
+   sudo dd if=xxx.img of=/dev/sda bs=4M status=progress conv=fsync
+   sync
+   ```
+5. 拔出 TF 卡插入 ELF3588 卡槽，上电即可启动
+
+#### 方式二：RKDevTool 烧 eMMC（Windows）
 
 **物料**：解压后的 `*.img` + `MiniLoaderAll.bin`
 
@@ -104,7 +127,7 @@ graph LR
 
 **烧写日志流程**：
 
-```
+```text
 下载 Boot → 等待 Maskrom → 测试设备 → 校验芯片 → 获取 Flash 信息
 → 准备 IDB → 下载 IDB → 切换存储到 EMMC → 下载固件 → 完成
 ```
@@ -114,7 +137,22 @@ graph LR
 - 飞牛「设置 → 存储空间管理 → 创建存储空间」使用剩余空间（32G 盘约 17G）
 - XFCE 桌面 / XRDP / python3-tk / aiohttp 已预装，可直接使用
 
-### 4. Release 命名
+### 4. MiniLoaderAll.bin 说明
+
+`MiniLoaderAll.bin` 是瑞芯微 RK3588 的 **Loader**——BootROM 之后加载的第一级引导
+（负责 DDR 初始化 + USB 下载），烧写 eMMC 时 RKDevTool 的「Loader」栏必须选它。
+
+- 本仓库提供 **v1.11** 版本（`assets/MiniLoaderAll.bin`），并随每个 Release 自动附带
+- 它**不是**从源码编译的，而是用瑞芯微 [rkbin](https://github.com/rockchip-linux/rkbin)
+  仓库的预编译组件（DDR init + usbplug + SPL）通过 `boot_merger` 合并而成：
+  ```bash
+  cd rkbin && ./tools/boot_merger ./RKBOOT/RK3588MINIALL.ini
+  # 输出 rk3588_spl_loader_v1.21.114.bin，即 MiniLoaderAll.bin
+  ```
+- 不同内存颗粒对应不同 DDR bin，本仓库版本针对 LP4 2112MHz / LP5 2400MHz（ELF3588 板载内存）。
+  如需其它内存版本，请参考 rkbin 仓库自行合并
+
+### 5. Release 命名
 
 - 标准版 tag: `elf3588-<日期>`（如 `elf3588-2026.07.12`）
 - 数据版 tag: `elf3588-sys12g-<日期>`（如 `elf3588-sys12g-2026.07.12`）

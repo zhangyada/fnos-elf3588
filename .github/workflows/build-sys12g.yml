@@ -166,20 +166,23 @@ jobs:
 
             - 基础: ${{ steps.find.outputs.tag }}
             - 内核: k${{ steps.ver.outputs.kver }}
-            - 烧写: 解压 *.img.gz 后用瑞芯微开发工具（.img + MiniLoaderAll.bin）或 dd 写入
+            - 烧写: 解压 *.img.gz 后用瑞芯微开发工具（.img + MiniLoaderAll.bin，均已随本 Release 附带）或 dd 写入
 
             校验：sha256sum -c SHA256SUMS
         run: |
           cd out10g
+          # 把 MiniLoaderAll.bin（Loader）一并附到 Release，供 eMMC 烧写
+          cp "$GITHUB_WORKSPACE/assets/MiniLoaderAll.bin" .
+          (cd "$GITHUB_WORKSPACE/assets" && sha256sum MiniLoaderAll.bin) >> SHA256SUMS
           TAG="elf3588-sys12g-${{ steps.ver.outputs.date }}"
           TITLE="ELF3588 FnOS (系统12G+数据自适应) k${{ steps.ver.outputs.kver }}"
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             # 已存在：更新标题/描述（gh create 不会改已有 release 的 title/body）
             gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --notes "$RELEASE_NOTES"
-            gh release upload "$TAG" SHA256SUMS *.img.gz \
+            gh release upload "$TAG" SHA256SUMS MiniLoaderAll.bin *.img.gz \
               --repo "$GITHUB_REPOSITORY" --clobber
           else
-            gh release create "$TAG" SHA256SUMS *.img.gz \
+            gh release create "$TAG" SHA256SUMS MiniLoaderAll.bin *.img.gz \
               --repo "$GITHUB_REPOSITORY" \
               --title "$TITLE" \
               --notes "$RELEASE_NOTES"
