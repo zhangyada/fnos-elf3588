@@ -9,7 +9,6 @@
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/pinctrl/rockchip.h>
-#include <dt-bindings/soc/rockchip,vop2.h>
 #include <dt-bindings/usb/pd.h>
 #include "rk3588-fet3588-c.dtsi"
 
@@ -20,17 +19,6 @@
 	aliases {
 		ethernet0 = &gmac0;
 		mmc1 = &sdmmc;
-	};
-
-	hdmi0-con {
-		compatible = "hdmi-connector";
-		type = "a";
-
-		port {
-			hdmi0_con_in: endpoint {
-				remote-endpoint = <&hdmi0_out_con>;
-			};
-		};
 	};
 
 	fan: pwm-fan {
@@ -188,31 +176,6 @@
 	status = "okay";
 };
 
-/* ===== HDMI Output ===== */
-&hdmi0 {
-	status = "okay";
-};
-
-&hdmi0_in {
-	hdmi0_in_vp0: endpoint {
-		remote-endpoint = <&vp0_out_hdmi0>;
-	};
-};
-
-&hdmi0_out {
-	hdmi0_out_con: endpoint {
-		remote-endpoint = <&hdmi0_con_in>;
-	};
-};
-
-&hdmi0_sound {
-	status = "okay";
-};
-
-&hdptxphy0 {
-	status = "okay";
-};
-
 /* ===== I2C buses ===== */
 &i2c2 {
 	status = "okay";
@@ -336,10 +299,6 @@
 	reset-gpios = <&gpio3 RK_PD1 GPIO_ACTIVE_HIGH>;
 	vpcie3v3-supply = <&vcc3v3_pcie2x1l2>;
 	status = "okay";
-};
-
-&pd_gpu {
-	domain-supply = <&vdd_gpu_s0>;
 };
 
 /* ===== Pinctrl ===== */
@@ -500,18 +459,3 @@
 	};
 };
 
-/* ===== Display ===== */
-&vop {
-	status = "okay";
-};
-
-&vop_mmu {
-	status = "okay";
-};
-
-&vp0 {
-	vp0_out_hdmi0: endpoint@ROCKCHIP_VOP2_EP_HDMI0 {
-		reg = <ROCKCHIP_VOP2_EP_HDMI0>;
-		remote-endpoint = <&hdmi0_in_vp0>;
-	};
-};
