@@ -179,6 +179,14 @@ jobs:
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             # 已存在：更新标题/描述（gh create 不会改已有 release 的 title/body）
             gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --notes "$RELEASE_NOTES"
+            # 合并旧 SHA256SUMS，避免 --clobber 覆盖丢失历史镜像的校验值
+            mkdir -p .oldsums
+            gh release download "$TAG" --pattern 'SHA256SUMS' \
+              --repo "$GITHUB_REPOSITORY" --dir .oldsums --clobber >/dev/null 2>&1 || true
+            if [ -f .oldsums/SHA256SUMS ]; then
+              cat .oldsums/SHA256SUMS >> SHA256SUMS
+              awk '!seen[$2]++' SHA256SUMS > SHA256SUMS.tmp && mv SHA256SUMS.tmp SHA256SUMS
+            fi
             gh release upload "$TAG" SHA256SUMS MiniLoaderAll.bin *.img.gz \
               --repo "$GITHUB_REPOSITORY" --clobber
           else
