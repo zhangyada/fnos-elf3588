@@ -1,3 +1,4 @@
 # 已构建过的镜像记录，格式：<asset_name> <sha256>
+fnnas_rockchip_orangepi-5-plus_k6.12.41_2026.06.25.img.gz cbf3002d91150f2e4c0d269cdef555aa897ab5ca1f4ae2bb464c0d52671749e8
 fnnas_rockchip_orangepi-5-plus_k6.18.18_2026.06.25.img.gz c12f5583641411bff2c97e46b91628527a3dfdc37db9864d474cb862508e50d1
 fnnas_rockchip_orangepi-5-plus_k6.18.18_2026.07.12.img.gz fd170f18c9e9027b99bbd551e2866108c55dcb8137542be637a7d6a8cef91902
